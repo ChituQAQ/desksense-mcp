@@ -1,4 +1,4 @@
-# PC Sense MCP — 移除自启动任务
+﻿# PC Sense MCP — 移除自启动任务
 # 用法: .\scripts\uninstall-autostart.ps1
 $ErrorActionPreference = 'SilentlyContinue'
 $TaskName = 'PC Sense MCP'

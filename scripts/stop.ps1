@@ -1,4 +1,4 @@
-# PC Sense MCP — 停止脚本
+﻿# PC Sense MCP — 停止脚本
 # 用法: .\scripts\stop.ps1
 $ErrorActionPreference = 'SilentlyContinue'
 $Root = Split-Path -Parent $PSScriptRoot
@@ -10,8 +10,8 @@ if (-not $conns) {
     exit 0
 }
 $pids = $conns.OwningProcess | Sort-Object -Unique
-foreach ($pid in $pids) {
-    Stop-Process -Id $pid -Force
-    Write-Host "已停止进程 PID=$pid"
+foreach ($procPid in $pids) {
+    Stop-Process -Id $procPid -Force
+    Write-Host "已停止进程 PID=$procPid"
 }
 Write-Host "PC Sense MCP 已停止。"
