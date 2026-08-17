@@ -26,8 +26,8 @@ DEFAULTS: Dict[str, Any] = {
     "max_open_windows": 100,
     "open_apps_limit": 15,
     "exclude_processes": [],
+    "allowed_origins": [],
 }
-
 
 class Config:
     def __init__(self, data: Dict[str, Any]) -> None:
@@ -66,15 +66,16 @@ class Config:
     @property
     def max_open_windows(self) -> int:
         return int(self.get("max_open_windows"))
-
     @property
     def open_apps_limit(self) -> int:
         return int(self.get("open_apps_limit"))
-
     @property
     def exclude_processes(self) -> list:
         return list(self.get("exclude_processes") or [])
 
+    @property
+    def allowed_origins(self) -> list:
+        return list(self.get("allowed_origins") or [])
     def is_excluded_process(self, name: str) -> bool:
         if not name:
             return False

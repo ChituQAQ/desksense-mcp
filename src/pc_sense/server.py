@@ -32,6 +32,7 @@ from .tools import (
 )
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 SERVICE_NAME = "PC Sense MCP"
 SERVICE_VERSION = "1.0.0"
@@ -154,9 +155,16 @@ def build_app(cfg: Optional[Config] = None):
     logger.info("focus history monitor 已启动 @ %s", cfg.db_path)
 
     server = _create_server(cfg, history)
+    _ts = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=list(cfg.allowed_origins)
+        or ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+    )
     mcp_app = server.streamable_http_app(
         streamable_http_path="/mcp",
         host=cfg.host,
+        transport_security=_ts,
     )
 
     from starlette.middleware.cors import CORSMiddleware
