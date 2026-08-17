@@ -1,0 +1,26 @@
+# PC Sense MCP — Cloudflare Quick Tunnel 启动脚本
+# 临时公网地址（用于测试），需已安装 cloudflared 或从 pip 获得 cloudflared。
+# 用法: .\scripts\start-quick-tunnel.ps1
+$ErrorActionPreference = 'Stop'
+
+# 查找 cloudflared
+$cf = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
+if (-not $cf) {
+    $pipCf = Join-Path $env:LOCALAPPDATA 'pip\Scripts\cloudflared.exe'
+    if (Test-Path $pipCf) { $cf = $pipCf }
+}
+if (-not $cf) {
+    Write-Host "未找到 cloudflared。请先安装："
+    Write-Host "  winget install --id Cloudflare.cloudflared"
+    Write-Host "  或  pip install cloudflared"
+    exit 1
+}
+
+$Root = Split-Path -Parent $PSScriptRoot
+$key = (Get-Content (Join-Path $Root '.secrets\API_KEY.txt') -Raw).Trim()
+Write-Host "Bearer Token 已从 .secrets/API_KEY.txt 读取（不会打印）。"
+Write-Host "正在启动 Quick Tunnel -> http://127.0.0.1:8765/mcp"
+Write-Host "按 Ctrl+C 停止。"
+
+# 隧道进程在前台运行，方便查看分配到的 trycloudflare.com 地址
+& $cf tunnel --url http://127.0.0.1:8765

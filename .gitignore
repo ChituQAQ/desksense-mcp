@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Virtual env
+.venv/
+
+# Secrets — never commit
+.secrets/
+
+# Runtime data
+data/*.db
+data/*.db-*
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
