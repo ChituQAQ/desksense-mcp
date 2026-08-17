@@ -107,31 +107,31 @@ def _create_server(cfg: Config, history: FocusHistory) -> MCPServer:
         description="Windows 本机电脑感知 MCP（只读）。可查询当前前台程序、打开的窗口、闲置时间、系统负载与焦点切换历史。",
     )
 
-    @server.tool(name="pc_get_context", description="【默认综合工具】一次返回当前电脑整体状态：前台应用、当前窗口标题、pid、闲置状态、主要打开应用（最多约 15 个）、CPU、内存、开机时间、固定磁盘概览。当用户说“看看我电脑 / 我电脑上在干嘛 / 我现在电脑什么状态”时优先调用本工具。")
+    @server.tool(name="pc_get_context", description="【综合工具】一次返回当前电脑整体状态：正在使用的前台应用、窗口标题、闲置状态、主要打开应用（最多约 15 个）、CPU、内存、开机时间与磁盘概览。当用户谈论“我现在在电脑上做什么”“刚才在干什么”或询问电脑当前状态而未指定具体细节时，一条调用即可给出全局快照，最适合主动探测用户当前所处场景。")
     def _impl_get_context() -> Dict[str, Any]:
         return pc_get_context(cfg, history)
 
-    @server.tool(name="pc_get_focus", description="获取当前前台窗口信息：使用 Windows API (GetForegroundWindow/GetWindowText/GetWindowThreadProcessId) 结合 psutil，返回 pid、进程名、可执行文件路径（安全时）、窗口标题。")
+    @server.tool(name="pc_get_focus", description="获取用户此刻正在使用的单一前台窗口：返回进程名、可执行文件路径、PID 与窗口标题。当用户问“我现在在看什么”“我正在用哪个软件”“当前窗口是什么”时，这是最精准的直接答案，比综合工具更聚焦、开销更低。")
     def _impl_get_focus() -> Dict[str, Any]:
         return pc_get_focus(cfg, include_path=True)
 
-    @server.tool(name="pc_list_open_apps", description="列出用户当前“打开着的”桌面应用窗口（可见顶层窗口，过滤不可见/空标题/tool window/cloaked 系统噪音，按应用聚合）。返回的是用户肉眼看到的打开程序，不是后台服务进程。include_titles 控制是否附带窗口标题，limit 控制返回应用数上限。")
+    @server.tool(name="pc_list_open_apps", description="列出用户当前打开着的所有桌面应用窗口（可见顶层窗口，按应用聚合，可选附带窗口标题），即用户肉眼看到的程序清单，而非后台进程。当话题涉及“我开了哪些窗口”“我正在用多少/哪些软件”或需要枚举当前工作环境时调用。")
     def _impl_list_open_apps(include_titles: bool = True, limit: int = 30) -> Dict[str, Any]:
         return pc_list_open_apps(cfg, include_titles=include_titles, limit=limit)
 
-    @server.tool(name="pc_get_idle_status", description="获取用户多久没有操作电脑（键盘/鼠标）。返回 idle_seconds 与 state：active(<60s)/idle(60–300s)/away(>300s)。")
+    @server.tool(name="pc_get_idle_status", description="返回用户距上次键盘/鼠标操作已过去多久：idle_seconds 与状态 active(<60s)/idle(60–300s)/away(>300s)。当话题涉及“我离开电脑多久”“是否在线/在忙”“有没有人动过我电脑”时调用，常用于判断用户当前是否在场。")
     def _impl_get_idle_status() -> Dict[str, Any]:
         return pc_get_idle_status(cfg)
 
-    @server.tool(name="pc_get_pc_status", description="获取 PC 整体状态（只读）：CPU 使用率、物理内存总量与使用率、固定磁盘容量与使用率、开机时间、网络累计收发字节。")
+    @server.tool(name="pc_get_pc_status", description="获取 PC 硬件/系统整体健康状态（只读）：CPU 使用率、内存容量与使用率、磁盘容量与使用率、开机时间、网络累计收发字节。当话题关于“电脑卡不卡/内存够不够/磁盘剩多少/开机多久/运行了多久”这类性能体检时调用。")
     def _impl_get_pc_status() -> Dict[str, Any]:
         return pc_get_pc_status(cfg)
 
-    @server.tool(name="pc_get_top_processes", description="列出资源占用最高的进程。limit 控制返回条数（默认 10，上限 30）；sort_by 可选 'cpu' 或 'memory'（默认 memory）。CPU 统计有短暂采样以确保非零。")
+    @server.tool(name="pc_get_top_processes", description="列出当前资源占用最高的进程（可按 CPU 或内存排序，默认内存，返回条数可调）。当话题关于“是什么在占用我的电脑/哪个程序最耗资源/电脑为什么慢”这类性能排查时调用，比综合工具给出的顶栏快照更详细。")
     def _impl_get_top_processes(sort_by: str = "memory", limit: int = 10) -> Dict[str, Any]:
         return pc_get_top_processes(cfg, sort_by=sort_by, limit=limit)
 
-    @server.tool(name="pc_get_recent_focus", description="查询最近前台程序切换历史。后台每约 1 秒检测前台窗口，仅在进程或窗口标题变化时写入 SQLite。minutes 查询最近几分钟（默认 30，上限 1440），limit 限制返回条数（默认 100，上限 500）。按时间升序返回。")
+    @server.tool(name="pc_get_recent_focus", description="返回用户最近的前台程序切换时间线（后台每约 1 秒采样前台窗口，仅在进程或窗口标题变化时记录；可按分钟/条数截取，时间升序）。当话题关于“我刚才/最近在电脑上做了什么”“几分钟前在用什么软件”“这段时间的专注或切换轨迹”时，用于还原用户刚经历的工作路径。")
     def _impl_get_recent_focus(minutes: int = 30, limit: int = 100) -> Dict[str, Any]:
         return pc_get_recent_focus(cfg, history, minutes=minutes, limit=limit)
 
@@ -157,7 +157,8 @@ def build_app(cfg: Optional[Config] = None):
     server = _create_server(cfg, history)
     _ts = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        + [o.split("://", 1)[-1] for o in (cfg.allowed_origins or []) if o],
         allowed_origins=list(cfg.allowed_origins)
         or ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
     )
@@ -171,7 +172,9 @@ def build_app(cfg: Optional[Config] = None):
 
     app = CORSMiddleware(
         BearerAuthMiddleware(mcp_app, cfg),
-        allow_origins=["*"],
+allow_origins=list(cfg.allowed_origins)
+        if cfg.allowed_origins
+        else ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
         allow_methods=["*"],
         allow_headers=ALLOW_HEADERS,
         expose_headers=EXPOSE_HEADERS,

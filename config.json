@@ -1,6 +1,7 @@
 {
-  "host": "127.0.0.1",
+"host": "127.0.0.1",
   "port": 8765,
+"allowed_origins": ["https://pc.sullyos.ccwu.cc", "https://qegj567-cloud.github.io"],
   "focus_poll_interval": 1.0,
   "active_threshold_seconds": 60,
   "away_threshold_seconds": 300,
