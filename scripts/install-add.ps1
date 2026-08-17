@@ -44,6 +44,7 @@ $DatabasePath = Join-Path $DataDir 'pc_sense.db'
 $LogsDir = Join-Path $Root 'logs'
 $VenvDir = Join-Path $Root '.venv'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+$VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
 $RequirementsPath = Join-Path $Root 'requirements.txt'
 $CloudflaredHome = Join-Path $UserHome '.cloudflared'
 $TunnelConfigPath = Join-Path $CloudflaredHome "$TunnelName.yml"
@@ -65,7 +66,7 @@ if (-not $PythonCommand) {
     throw 'Python 3.11 or newer was not found on PATH.'
 }
 $PythonExe = $PythonCommand.Source
-$VersionText = (& $PythonExe @PythonPrefixArgs -c 'import sys; print("%d.%d" % sys.version_info[:2])').Trim()
+$VersionText = (& $PythonExe @PythonPrefixArgs -c "import sys; print('%d.%d' % sys.version_info[:2])").Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to run Python.' }
 $VersionParts = $VersionText.Split('.')
 if ([int]$VersionParts[0] -lt 3 -or ([int]$VersionParts[0] -eq 3 -and [int]$VersionParts[1] -lt 11)) {
@@ -78,6 +79,9 @@ if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
         throw 'Virtual environment creation failed.'
     }
+}
+if (-not (Test-Path -LiteralPath $VenvPythonw -PathType Leaf)) {
+    throw "The virtual environment does not contain pythonw.exe: $VenvPythonw"
 }
 
 Write-Host 'Installing project dependencies...'
@@ -162,62 +166,97 @@ if (-not $Cloudflared) { throw 'cloudflared.exe was not found on PATH or in a st
 Write-Host "cloudflared : $Cloudflared"
 New-Item -ItemType Directory -Force -Path $CloudflaredHome | Out-Null
 
-$CloudflaredErrorPath = Join-Path $env:TEMP ("pc-sense-add-cloudflared-{0}.err" -f ([Guid]::NewGuid().ToString('N')))
+function ConvertTo-ProcessArgument {
+    param([string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+
+    $Escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $Escaped = [regex]::Replace($Escaped, '(\\+)$', '$1$1')
+    return '"' + $Escaped + '"'
+}
+
+function Invoke-CloudflaredManagement {
+    param([string[]]$ArgumentList)
+
+    $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $StartInfo.FileName = $Cloudflared
+    $StartInfo.Arguments = (($ArgumentList | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join ' ')
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+
+    $Process = New-Object System.Diagnostics.Process
+    $Process.StartInfo = $StartInfo
+    try {
+        if (-not $Process.Start()) { throw 'cloudflared did not start.' }
+        $StandardOutputTask = $Process.StandardOutput.ReadToEndAsync()
+        $StandardErrorTask = $Process.StandardError.ReadToEndAsync()
+        $Process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $Process.ExitCode
+            StandardOutput = $StandardOutputTask.Result
+            StandardError = $StandardErrorTask.Result
+        }
+    } finally {
+        $Process.Dispose()
+    }
+}
+
 function Read-TunnelList {
-    $Output = & $Cloudflared tunnel list --output json 2> $CloudflaredErrorPath
-    if ($LASTEXITCODE -ne 0) {
+    $Command = Invoke-CloudflaredManagement @('tunnel', 'list', '--output', 'json')
+    if ($Command.ExitCode -ne 0) {
         return [pscustomobject]@{ Success = $false; Tunnels = @() }
     }
     try {
-        $Parsed = (($Output | Out-String).Trim() | ConvertFrom-Json)
+        $Parsed = ($Command.StandardOutput.Trim() | ConvertFrom-Json)
         return [pscustomobject]@{ Success = $true; Tunnels = @($Parsed) }
     } catch {
         return [pscustomobject]@{ Success = $false; Tunnels = @() }
     }
 }
 
-try {
+$TunnelListResult = Read-TunnelList
+if (-not $TunnelListResult.Success) {
+    Write-Host '请完成 Cloudflare 浏览器授权，完成后回来继续。' -ForegroundColor Yellow
+    $LoginCommand = Invoke-CloudflaredManagement @('tunnel', 'login')
+    if ($LoginCommand.ExitCode -ne 0) { throw 'Cloudflare browser authorization did not complete successfully.' }
     $TunnelListResult = Read-TunnelList
-    if (-not $TunnelListResult.Success) {
-        Write-Host '请完成 Cloudflare 浏览器授权，完成后回来继续。' -ForegroundColor Yellow
-        & $Cloudflared tunnel login
-        if ($LASTEXITCODE -ne 0) { throw 'Cloudflare browser authorization did not complete successfully.' }
-        $TunnelListResult = Read-TunnelList
-        if (-not $TunnelListResult.Success) { throw 'Cloudflare login could not be validated.' }
-    }
+    if (-not $TunnelListResult.Success) { throw 'Cloudflare login could not be validated.' }
+}
 
+$MatchingTunnels = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq $TunnelName })
+if ($MatchingTunnels.Count -gt 1) { throw "More than one tunnel is named '$TunnelName'." }
+if ($MatchingTunnels.Count -eq 0) {
+    Write-Host "Creating independent Named Tunnel: $TunnelName"
+    $CreateCommand = Invoke-CloudflaredManagement @('tunnel', 'create', $TunnelName)
+    if ($CreateCommand.ExitCode -ne 0) { throw "Failed to create Named Tunnel '$TunnelName'." }
+    $TunnelListResult = Read-TunnelList
+    if (-not $TunnelListResult.Success) { throw 'Unable to read the tunnel list after creation.' }
     $MatchingTunnels = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq $TunnelName })
-    if ($MatchingTunnels.Count -gt 1) { throw "More than one tunnel is named '$TunnelName'." }
-    if ($MatchingTunnels.Count -eq 0) {
-        Write-Host "Creating independent Named Tunnel: $TunnelName"
-        $CreateOutput = & $Cloudflared tunnel create $TunnelName 2> $CloudflaredErrorPath
-        if ($LASTEXITCODE -ne 0) { throw "Failed to create Named Tunnel '$TunnelName'." }
-        $TunnelListResult = Read-TunnelList
-        if (-not $TunnelListResult.Success) { throw 'Unable to read the tunnel list after creation.' }
-        $MatchingTunnels = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq $TunnelName })
-        if ($MatchingTunnels.Count -ne 1) { throw 'The newly created tunnel could not be identified uniquely.' }
-    } else {
-        Write-Host "Existing Home tunnel retained: $TunnelName"
-    }
+    if ($MatchingTunnels.Count -ne 1) { throw 'The newly created tunnel could not be identified uniquely.' }
+} else {
+    Write-Host "Existing Home tunnel retained: $TunnelName"
+}
 
-    $TunnelId = [string]$MatchingTunnels[0].id
-    if (-not $TunnelId) { throw 'The Home tunnel has no tunnel ID.' }
-    $WorkTunnel = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq 'pc-sense-mcp' })
-    if ($WorkTunnel.Count -gt 0 -and [string]$WorkTunnel[0].id -eq $TunnelId) {
-        throw 'Home and Work resolved to the same tunnel ID; refusing to continue.'
-    }
+$TunnelId = [string]$MatchingTunnels[0].id
+if (-not $TunnelId) { throw 'The Home tunnel has no tunnel ID.' }
+$WorkTunnel = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq 'pc-sense-mcp' })
+if ($WorkTunnel.Count -gt 0 -and [string]$WorkTunnel[0].id -eq $TunnelId) {
+    throw 'Home and Work resolved to the same tunnel ID; refusing to continue.'
+}
 
-    $CredentialsPath = Join-Path $CloudflaredHome "$TunnelId.json"
-    if (-not (Test-Path -LiteralPath $CredentialsPath -PathType Leaf)) {
-        throw "Home tunnel credentials are missing. The Work credentials will not be used: $CredentialsPath"
-    }
+$CredentialsPath = Join-Path $CloudflaredHome "$TunnelId.json"
+if (-not (Test-Path -LiteralPath $CredentialsPath -PathType Leaf)) {
+    throw "Home tunnel credentials are missing. The Work credentials will not be used: $CredentialsPath"
+}
 
-    Write-Host "Creating/updating DNS route for $Hostname"
-    $RouteOutput = & $Cloudflared tunnel route dns --overwrite-dns $TunnelId $Hostname 2> $CloudflaredErrorPath
-    if ($LASTEXITCODE -ne 0) { throw "Failed to route $Hostname to the Home tunnel." }
+Write-Host "Creating/updating DNS route for $Hostname"
+$RouteCommand = Invoke-CloudflaredManagement @('tunnel', 'route', 'dns', '--overwrite-dns', $TunnelId, $Hostname)
+if ($RouteCommand.ExitCode -ne 0) { throw "Failed to route $Hostname to the Home tunnel." }
 
-    $YamlCredentialsPath = $CredentialsPath.Replace("'", "''")
-    $TunnelYaml = @"
+$YamlCredentialsPath = $CredentialsPath.Replace("'", "''")
+$TunnelYaml = @"
 tunnel: $TunnelId
 credentials-file: '$YamlCredentialsPath'
 protocol: http2
@@ -227,13 +266,8 @@ ingress:
     service: http://127.0.0.1:8765
   - service: http_status:404
 "@
-    [System.IO.File]::WriteAllText($TunnelConfigPath, $TunnelYaml + "`n", $Utf8NoBom)
-    Write-Host "Wrote Home tunnel config: $TunnelConfigPath"
-} finally {
-    if (Test-Path -LiteralPath $CloudflaredErrorPath) {
-        [System.IO.File]::Delete($CloudflaredErrorPath)
-    }
-}
+[System.IO.File]::WriteAllText($TunnelConfigPath, $TunnelYaml + "`n", $Utf8NoBom)
+Write-Host "Wrote Home tunnel config: $TunnelConfigPath"
 
 foreach ($CommandName in @('Register-ScheduledTask', 'New-ScheduledTaskAction', 'New-ScheduledTaskPrincipal')) {
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
@@ -255,9 +289,13 @@ function Register-InteractiveTask {
     Write-Host "Registered user-login task: $Name" -ForegroundColor Green
 }
 
-$McpAction = New-ScheduledTaskAction -Execute $VenvPython -Argument '-m pc_sense.server' -WorkingDirectory $Root
-$TunnelArguments = "tunnel --config `"$TunnelConfigPath`" run $TunnelId"
-$TunnelAction = New-ScheduledTaskAction -Execute $Cloudflared -Argument $TunnelArguments -WorkingDirectory $Root
+$McpAction = New-ScheduledTaskAction -Execute $VenvPythonw -Argument '-m pc_sense.server' -WorkingDirectory $Root
+$Wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+$TunnelLauncher = Join-Path $PSScriptRoot 'run-cloudflared-hidden.vbs'
+if (-not (Test-Path -LiteralPath $Wscript -PathType Leaf)) { throw "wscript.exe was not found: $Wscript" }
+if (-not (Test-Path -LiteralPath $TunnelLauncher -PathType Leaf)) { throw "Tunnel launcher was not found: $TunnelLauncher" }
+$TunnelArguments = "//B //NoLogo `"$TunnelLauncher`" `"$Cloudflared`" `"$TunnelConfigPath`" `"$TunnelId`""
+$TunnelAction = New-ScheduledTaskAction -Execute $Wscript -Argument $TunnelArguments -WorkingDirectory $Root
 Register-InteractiveTask $TaskMcp $McpAction 'DeskSense Home MCP user-login autostart'
 Register-InteractiveTask $TaskTunnel $TunnelAction 'Cloudflared independent Home Named Tunnel user-login autostart'
 
