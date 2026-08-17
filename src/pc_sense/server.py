@@ -107,7 +107,7 @@ def _create_server(cfg: Config, history: FocusHistory) -> MCPServer:
         description="Windows 本机电脑感知 MCP（只读）。可查询当前前台程序、打开的窗口、闲置时间、系统负载与焦点切换历史。",
     )
 
-    @server.tool(name="pc_get_context", description="【综合工具】一次返回当前电脑整体状态：正在使用的前台应用、窗口标题、闲置状态、主要打开应用（最多约 15 个）、CPU、内存、开机时间与磁盘概览。当用户谈论“我现在在电脑上做什么”“刚才在干什么”或询问电脑当前状态而未指定具体细节时，一条调用即可给出全局快照，最适合主动探测用户当前所处场景。")
+    @server.tool(name="pc_get_context", description="【综合工具】一次返回当前电脑整体状态：正在使用的前台应用、窗口标题、闲置状态、主要打开应用（最多约 15 个）、CPU、内存、开机时间与磁盘概览。当用户谈论“我现在在电脑上做什么”“刚才在干什么”或询问电脑当前状态而未指定具体细节时，一条调用即可给出全局快照。适合在回答明显依赖用户当前电脑现场时作为默认入口。")
     def _impl_get_context() -> Dict[str, Any]:
         return pc_get_context(cfg, history)
 
@@ -119,7 +119,7 @@ def _create_server(cfg: Config, history: FocusHistory) -> MCPServer:
     def _impl_list_open_apps(include_titles: bool = True, limit: int = 30) -> Dict[str, Any]:
         return pc_list_open_apps(cfg, include_titles=include_titles, limit=limit)
 
-    @server.tool(name="pc_get_idle_status", description="返回用户距上次键盘/鼠标操作已过去多久：idle_seconds 与状态 active(<60s)/idle(60–300s)/away(>300s)。当话题涉及“我离开电脑多久”“是否在线/在忙”“有没有人动过我电脑”时调用，常用于判断用户当前是否在场。")
+    @server.tool(name="pc_get_idle_status", description="返回用户距上次键盘/鼠标操作已过去多久：idle_seconds 与状态 active(<60s)/idle(60–300s)/away(>300s)。当话题涉及“我离开电脑多久”“现在是否仍在电脑前”“电脑多久没有操作”时调用，常用于判断用户当前是否在场。")
     def _impl_get_idle_status() -> Dict[str, Any]:
         return pc_get_idle_status(cfg)
 
@@ -131,7 +131,7 @@ def _create_server(cfg: Config, history: FocusHistory) -> MCPServer:
     def _impl_get_top_processes(sort_by: str = "memory", limit: int = 10) -> Dict[str, Any]:
         return pc_get_top_processes(cfg, sort_by=sort_by, limit=limit)
 
-    @server.tool(name="pc_get_recent_focus", description="返回用户最近的前台程序切换时间线（后台每约 1 秒采样前台窗口，仅在进程或窗口标题变化时记录；可按分钟/条数截取，时间升序）。当话题关于“我刚才/最近在电脑上做了什么”“几分钟前在用什么软件”“这段时间的专注或切换轨迹”时，用于还原用户刚经历的工作路径。")
+    @server.tool(name="pc_get_recent_focus", description="返回用户最近的前台程序切换时间线（后台每约 1 秒采样前台窗口，仅在进程或窗口标题变化时记录；可按分钟/条数截取，时间升序）。当话题关于“我刚才/最近在电脑上做了什么”“几分钟前在用什么软件”“这段时间的专注或切换轨迹”时，用于还原近期前台应用与窗口切换轨迹。")
     def _impl_get_recent_focus(minutes: int = 30, limit: int = 100) -> Dict[str, Any]:
         return pc_get_recent_focus(cfg, history, minutes=minutes, limit=limit)
 
