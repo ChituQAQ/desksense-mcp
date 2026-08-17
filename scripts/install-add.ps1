@@ -323,6 +323,7 @@ async def verify_http(base, token, origin, local):
 
     headers = {
         "Authorization": "Bearer " + token,
+        "Origin": origin,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
@@ -340,7 +341,16 @@ async def main():
     token = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
     origin = sys.argv[2]
     public_base = sys.argv[3]
-    await verify_http("http://127.0.0.1:8765", token, origin, True)
+    last_error = None
+    for _ in range(30):
+        try:
+            await verify_http("http://127.0.0.1:8765", token, origin, True)
+            break
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(1)
+    else:
+        raise last_error
     last_error = None
     for _ in range(30):
         try:
