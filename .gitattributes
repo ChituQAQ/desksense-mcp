@@ -1,0 +1,16 @@
+# 规范换行符
+* text=auto
+
+# PowerShell 脚本统一 LF（git 侧），检出按平台
+*.ps1 text eol=crlf
+
+# 文本文件
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+
+# 二进制 / 运行时数据不入库
+*.db binary
+*.db-wal binary
+*.db-shm binary
