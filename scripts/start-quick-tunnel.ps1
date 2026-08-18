@@ -17,10 +17,14 @@ if (-not $cf) {
 }
 
 $Root = Split-Path -Parent $PSScriptRoot
-$key = (Get-Content (Join-Path $Root '.secrets\API_KEY.txt') -Raw).Trim()
-Write-Host "Bearer Token 已从 .secrets/API_KEY.txt 读取（不会打印）。"
-Write-Host "正在启动 Quick Tunnel -> http://127.0.0.1:8765/mcp"
+$Port = 8765
+$ConfigPath = Join-Path $Root 'config.json'
+if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+    $Config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($Config.port) { $Port = [int]$Config.port }
+}
+Write-Host "正在启动 Quick Tunnel -> http://127.0.0.1:$Port/mcp"
 Write-Host "按 Ctrl+C 停止。"
 
 # 隧道进程在前台运行，方便查看分配到的 trycloudflare.com 地址
-& $cf tunnel --url http://127.0.0.1:8765
+& $cf tunnel --url "http://127.0.0.1:$Port"

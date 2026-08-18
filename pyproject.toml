@@ -1,18 +1,19 @@
 [project]
 name = "desksense-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "Windows 本机电脑感知 MCP（只读）— Streamable HTTP"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "mcp>=2.0.0",
-    "psutil>=5.9.0",
-    "pywin32>=305; sys_platform == 'win32'",
-    "starlette>=0.37",
-    "uvicorn>=0.27",
+    "httpx2>=2.0,<3",
+    "mcp>=2.0,<3",
+    "psutil>=5.9,<8",
+    "pywin32>=311; sys_platform == 'win32'",
+    "starlette>=0.37,<2",
+    "uvicorn>=0.27,<1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0,<9", "pytest-asyncio>=0.24,<2"]
 
 [project.scripts]
 desksense = "desksense.server:main"

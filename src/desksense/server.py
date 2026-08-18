@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from starlette.responses import JSONResponse
 
@@ -35,7 +36,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 SERVICE_NAME = "DeskSense MCP"
-SERVICE_VERSION = "1.0.0"
+SERVICE_VERSION = "1.0.1"
 
 logger = logging.getLogger("desksense")
 
@@ -47,6 +48,17 @@ ALLOW_HEADERS = [
     "Accept",
 ]
 EXPOSE_HEADERS = ["Mcp-Session-Id"]
+LOCAL_CORS_ORIGIN_REGEX = (
+    r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$"
+)
+LOCAL_TRANSPORT_ORIGINS = [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+    "https://127.0.0.1:*",
+    "https://localhost:*",
+    "https://[::1]:*",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +167,18 @@ def build_app(cfg: Optional[Config] = None):
     logger.info("focus history monitor 已启动 @ %s", cfg.db_path)
 
     server = _create_server(cfg, history)
+    configured_origins = [str(origin) for origin in cfg.allowed_origins if origin]
+    configured_hosts = []
+    for origin in configured_origins:
+        parsed = urlsplit(origin)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            configured_hosts.append(parsed.netloc)
+
     _ts = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
-        + [o.split("://", 1)[-1] for o in (cfg.allowed_origins or []) if o],
-        allowed_origins=list(cfg.allowed_origins)
-        or ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        + configured_hosts,
+        allowed_origins=LOCAL_TRANSPORT_ORIGINS + configured_origins,
     )
     mcp_app = server.streamable_http_app(
         streamable_http_path="/mcp",
@@ -172,9 +190,8 @@ allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
 
     app = CORSMiddleware(
         BearerAuthMiddleware(mcp_app, cfg),
-allow_origins=list(cfg.allowed_origins)
-        if cfg.allowed_origins
-        else ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        allow_origins=configured_origins,
+        allow_origin_regex=LOCAL_CORS_ORIGIN_REGEX,
         allow_methods=["*"],
         allow_headers=ALLOW_HEADERS,
         expose_headers=EXPOSE_HEADERS,

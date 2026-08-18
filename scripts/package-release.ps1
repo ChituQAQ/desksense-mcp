@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.0',
+    [string]$Version,
     [string]$OutputPath
 )
 
@@ -8,6 +8,16 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $Root = Split-Path -Parent $PSScriptRoot
+if (-not $Version) {
+    $ProjectFile = Join-Path $Root 'pyproject.toml'
+    $ProjectText = [System.IO.File]::ReadAllText($ProjectFile)
+    $VersionMatch = [regex]::Match($ProjectText, '(?m)^version\s*=\s*"([^"]+)"\s*$')
+    if (-not $VersionMatch.Success) { throw 'Unable to read project.version from pyproject.toml.' }
+    $Version = $VersionMatch.Groups[1].Value
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Release version must use MAJOR.MINOR.PATCH format: $Version"
+}
 if (-not $OutputPath) { $OutputPath = Join-Path $Root "dist\DeskSense-v$Version.zip" }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $Dist = Split-Path -Parent $OutputPath

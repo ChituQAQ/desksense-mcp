@@ -1,0 +1,102 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Import DeskSense
+        run: python -c "import desksense; print(desksense.__version__)"
+      - name: Test
+        run: python -m pytest -q
+
+  release-safety:
+    name: PowerShell and clean-room ZIP
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Parse every PowerShell script with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $failures = @()
+          foreach ($path in @(git ls-files '*.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path), [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            foreach ($parseError in $errors) {
+              $failures += "${path}: $parseError"
+            }
+          }
+          if ($failures.Count -gt 0) {
+            $failures | Write-Error
+            exit 1
+          }
+      - name: Verify VBS files have no BOM
+        shell: powershell
+        run: |
+          foreach ($path in @(git ls-files '*.vbs')) {
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+            $utf8Bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and `
+              $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            $utf16Bom = $bytes.Length -ge 2 -and (
+              ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or
+              ($bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF)
+            )
+            if ($utf8Bom -or $utf16Bom) { throw "VBS must have no BOM: $path" }
+          }
+      - name: Build and inspect release ZIP
+        shell: powershell
+        run: |
+          $zipPath = Join-Path $env:RUNNER_TEMP 'DeskSense-v1.0.1.zip'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File .\scripts\package-release.ps1 -OutputPath $zipPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inspect = Join-Path $env:RUNNER_TEMP 'DeskSense ZIP Inspection'
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $inspect
+          foreach ($forbidden in @(
+            '.secrets', 'config.json', 'data', 'logs', '.venv', 'cert.pem'
+          )) {
+            if (Test-Path -LiteralPath (Join-Path $inspect $forbidden)) {
+              throw "Release ZIP contains forbidden path: $forbidden"
+            }
+          }
+      - name: Clean-room local installer
+        shell: powershell
+        run: |
+          $zipPath = Join-Path $env:RUNNER_TEMP 'DeskSense-v1.0.1.zip'
+          $cleanRoom = Join-Path $env:RUNNER_TEMP 'DeskSense CI Clean Install Space'
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $cleanRoom
+          powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $cleanRoom 'scripts\install.ps1') `
+            -NoAutostart -Port 18765
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $listener = Get-NetTCPConnection -LocalPort 18765 -State Listen `
+            -ErrorAction SilentlyContinue
+          if ($listener) { throw 'Installer left a process listening on port 18765.' }
