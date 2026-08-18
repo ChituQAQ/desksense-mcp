@@ -345,7 +345,7 @@ ingress:
     }
 
     if ($NoAutostart) {
-        if ((Get-PortListener).Count -gt 0) {
+        if (@(Get-PortListener).Count -gt 0) {
             throw "Port $Port is already in use; refusing to start a temporary verification server."
         }
         $TemporaryServer = Start-NativeProcess $VenvPython @('-m', 'desksense.server') $Root
@@ -403,7 +403,7 @@ ingress:
                 'Cloudflared Named Tunnel user-login autostart'
         }
 
-        if ((Get-PortListener).Count -eq 0) {
+        if (@(Get-PortListener).Count -eq 0) {
             Start-ScheduledTask -TaskName $TaskMcp
         }
     }
