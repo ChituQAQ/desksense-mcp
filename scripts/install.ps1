@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$Hostname,
@@ -217,7 +217,7 @@ function Read-TunnelList {
 
 $TunnelListResult = Read-TunnelList
 if (-not $TunnelListResult.Success) {
-    Write-Host '请完成 Cloudflare 浏览器授权，完成后回来继续。' -ForegroundColor Yellow
+    Write-Host '璇峰畬鎴?Cloudflare 娴忚鍣ㄦ巿鏉冿紝瀹屾垚鍚庡洖鏉ョ户缁€? -ForegroundColor Yellow
     $LoginCommand = Invoke-CloudflaredManagement @('tunnel', 'login')
     if ($LoginCommand.ExitCode -ne 0) { throw 'Cloudflare browser authorization did not complete successfully.' }
     $TunnelListResult = Read-TunnelList

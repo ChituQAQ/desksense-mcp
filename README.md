@@ -1,162 +1,137 @@
-# PC Sense MCP
+# DeskSense
 
-Windows 本机「电脑感知」MCP 服务（**只读**）。
+DeskSense is a lightweight, read-only Windows MCP server that gives AI assistants awareness of the current PC state.
 
-通过 Standard MCP（Streamable HTTP）让 AI（如手机上的 SullyOS）可以了解当前电脑正在发生什么：
+It exposes MCP Streamable HTTP over a local server, protected by a bearer token. CORS is configurable for browser-based clients. A Cloudflare Tunnel is optional when a node needs controlled public access.
 
-- 当前前台程序 / 窗口标题
-- 打开的桌面应用窗口
-- 键盘鼠标闲置多久
-- CPU / 内存 / 磁盘 / 开机时间
-- 资源占用最高的进程
-- 最近的程序切换历史
+## What is DeskSense
 
-> ⚠️ 本项目**只读**。不提供 shell 执行、进程启停、文件修改、关机重启、注册表/服务修改、鼠标键盘模拟或任意代码执行。
+Run one independent DeskSense Node on each Windows PC you want to observe. A node reads desktop and system state; it does not execute commands or modify the computer.
 
----
+## Features
 
-## 环境
+- Windows-only, read-only PC sensing
+- MCP Streamable HTTP endpoint at `/mcp`
+- Bearer Token authentication
+- Configurable CORS origins
+- Optional Cloudflare Named or Quick Tunnel access
+- Interactive AtLogOn autostart through Task Scheduler
+- Hidden server startup via `wscript.exe`
+- Local health endpoint at `/healthz`
 
-- Python 3.14.6（venv: `.venv`）
-- MCP SDK 2.0.0（`mcp`）
-- `pywin32`、`psutil`、`starlette`、`uvicorn`
-- SQLite（焦点历史）
+## MCP Tools
 
-## 端点
+The server provides exactly these seven read-only tools:
 
-| 端点 | 方式 | 认证 | 用途 |
-|------|------|------|------|
-| `POST /mcp` | POST | Bearer Token（必需） | MCP Streamable HTTP 单端点 |
-| `GET /healthz` | GET | 无 | 健康检查 |
-| `OPTIONS` | OPTIONS | 无 | CORS 预检 |
+- `pc_get_context`
+- `pc_get_focus`
+- `pc_list_open_apps`
+- `pc_get_idle_status`
+- `pc_get_pc_status`
+- `pc_get_top_processes`
+- `pc_get_recent_focus`
 
-本地监听：`127.0.0.1:8765`
+## Architecture
 
-MCP 协议：`2025-03-26` 及更新（SDK 握手协商）。
-
-## MCP 工具（7 个，全只读）
-
-1. **pc_get_context** — 默认综合工具，一次返回前台、闲置、打开应用、CPU/内存/开机、磁盘。
-2. **pc_get_focus** — 当前前台窗口（进程名、pid、exe、标题）。
-3. **pc_list_open_apps** — 打开的桌面应用窗口（按应用聚合，过滤系统噪音）。
-4. **pc_get_idle_status** — 闲置秒数与状态（active/idle/away）。
-5. **pc_get_pc_status** — CPU/内存/磁盘/uptime/网络累计。
-6. **pc_get_top_processes** — 资源占用最高进程（按 cpu/memory 排序）。
-7. **pc_get_recent_focus** — 最近前台切换历史（SQLite）。
-
-## 运行
-
-```powershell
-# 后台启动（推荐）
-.\scripts\start.ps1
-
-# 状态 / 停止
-.\scripts\status.ps1
-.\scripts\stop.ps1
+```text
+AI assistant / MCP client
+          |
+          | HTTPS + Bearer Token (optional public tunnel)
+          v
+Cloudflare Tunnel (optional)
+          |
+          v
+127.0.0.1:8765  ->  python -m desksense.server
+          |
+          +--> Windows APIs, psutil, and local focus history
 ```
 
-手动启动：
+Each computer has its own token, configuration, runtime data, and optional tunnel. SullyOS is a tested example client, not a required or exclusive client.
+
+## Requirements
+
+- Windows 10 or newer
+- Python 3.11 or newer
+- `cloudflared` only when using a tunnel
+- A compatible MCP client
+
+## Quick Start
+
+From the repository root in PowerShell:
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pc_sense.server
+\.\.venv\Scripts\python.exe -m desksense.server
 ```
 
-## 用户登录自启动（Task Scheduler）
-
-在登录后的交互会话运行（非 SYSTEM / 非 Session 0，保证能读前台窗口）。
+For a complete node installation, including token generation, CORS, tunnel configuration, and autostart tasks:
 
 ```powershell
-.\scripts\install-autostart.ps1     # 注册（幂等）
-.\scripts\status.ps1
-.\scripts\uninstall-autostart.ps1   # 移除
+.\scripts\install.ps1 `
+  -Hostname desksense.example.com `
+  -TunnelName desksense
 ```
 
-## 认证
+Use `-AllowedOrigin https://example-client.app` when a browser client needs an additional origin. The installer prints the MCP URL and token file path without printing the token.
 
-`/mcp` 使用**静态 Bearer Token**（64 位 hex，32 随机字节）。Token 存放在：
+## Cloudflare Tunnel
 
-```
-.secrets\API_KEY.txt
-```
-
-- Token 由首次初始化生成，绝不会写入源码 / README / 日志 / git。
-- `.secrets/` 已被 `.gitignore` 忽略。
-- 调用示例：`Authorization: Bearer <token>`
-
-## CORS
-
-为浏览器端（SullyOS）已配置：
-
-- `Access-Control-Allow-Origin: *`
-- 允许请求头：`Content-Type`、`Authorization`、`Mcp-Protocol-Version`、`Mcp-Session-Id`、`Accept`
-- 暴露响应头：`Mcp-Session-Id`
-- 支持 `OPTIONS` 预检
-
-## 公网访问（Cloudflare Tunnel）
-
-本地 `127.0.0.1:8765` 测试通过后，用 `cloudflared` 建立隧道（不开放路由器端口）。
-
-Quick Tunnel（临时测试）：
+Cloudflare is optional. Use a Quick Tunnel for temporary testing:
 
 ```powershell
 .\scripts\start-quick-tunnel.ps1
 ```
 
-需要已安装 `cloudflared`（`winget install --id Cloudflare.cloudflared` 或 `pip install cloudflared`）。
+For a stable hostname, authenticate `cloudflared`, create or select a Named Tunnel, and use `start-named-tunnel.ps1` after installation. Point the tunnel at `http://127.0.0.1:8765` and expose only the intended hostname.
 
-> 固定的命名隧道需要你在 Cloudflare 控制台选定/绑定域名后再配置。SullyOS 最终填写 `https://<你的地址>/mcp`，Bearer Token 请从本机 `.secrets\API_KEY.txt` 手动复制（不在聊天中打印）。
+## Connect an MCP Client
 
-## 配置（config.json）
+Configure the client with:
 
-`config.json` 可调（不含密钥）：
+- MCP URL: `https://desksense.example.com/mcp` (or `http://127.0.0.1:8765/mcp` locally)
+- Authentication: `Bearer <token>`
 
-- `host` / `port`
-- `focus_poll_interval`：焦点轮询间隔（秒）
-- `active_threshold_seconds` / `away_threshold_seconds`：闲置阈值
-- `history_retention_days`：焦点历史保留天数
-- `exclude_processes`：要忽略的进程名
-- `max_open_windows` / `open_apps_limit`
+The token is stored locally in `.secrets\API_KEY.txt`. SullyOS can be used as an example client; any MCP client supporting Streamable HTTP and bearer authentication can connect.
 
-## 数据与日志
+## Multiple PCs / Nodes
 
-- 焦点历史 SQLite：`data\pc_sense.db`（WAL 模式，默认保留 30 天）
-- 运行日志：`logs\pc-sense.log`（rotating，5MB×3）
-  - 不记录 Authorization / API key / 完整窗口标题流水
+Install one DeskSense Node per Windows PC. Give every node a distinct hostname, tunnel name, and token, then configure each MCP endpoint separately in the client. Do not copy a node's runtime database or credentials between computers unless using the documented migration workflow.
 
-## 测试
+## Security & Privacy
+
+DeskSense is read-only, but its responses can contain application names, window titles, process information, and system metrics. Keep the bearer token private, restrict `AllowedOrigin` to trusted clients, and place public access behind a properly configured tunnel. Tokens are not written to source code or logs. Focus history is stored locally in `data\pc_sense.db`; logs are written under `logs\`.
+
+## Autostart
+
+The installer registers an Interactive AtLogOn task named `DeskSense MCP`. It launches `wscript.exe`, which starts `run-desksense-hidden.vbs`; the VBS script invokes `python.exe -m desksense.server` with no visible console window.
 
 ```powershell
-# 单元测试（需要服务不依赖；跑前无需启动）
-.\.venv\Scripts\python.exe -m pytest -q
-
-# 端到端集成测试（需先启动服务）
-PYTHONPATH=src .\.venv\Scripts\python.exe scripts\run_integration_test.py
+.\scripts\install-autostart.ps1
+.\scripts\status.ps1
+.\scripts\uninstall-autostart.ps1
 ```
 
-集成测试覆盖：未授权 401、initialize、tools/list、7 个工具逐个调用。
+Interactive logon is intentional because desktop sensing requires the user's Windows session.
 
-## 目录结构
+## Troubleshooting
 
+- Check local health: `Invoke-WebRequest http://127.0.0.1:8765/healthz`
+- Check task and process state: `.\scripts\status.ps1`
+- Review files under `logs\` (never share `.secrets\`)
+- Confirm `PYTHONPATH=src` when running directly from a checkout
+- Confirm the client sends `Authorization: Bearer <token>` and uses `/mcp`
+- For tunnel problems, verify `cloudflared` login, hostname routing, and that only one node runs a Named Tunnel
+
+## Development
+
+```powershell
+\.\.venv\Scripts\python.exe -m pytest -q
 ```
-pc-sense-mcp/
-  src/pc_sense/      源码
-  tests/             单元测试
-  scripts/           PowerShell 运维脚本
-  data/              焦点历史 SQLite
-  logs/              运行日志
-  .secrets/          API key（gitignored）
-  config.json        配置
-  pyproject.toml     项目元数据 / 依赖
-  requirements.txt   依赖
-```
 
-## SullyOS 配置
+Source is under `src/desksense`; tests are under `tests`. The server can be run locally with `PYTHONPATH=src` as shown above.
 
-1. 确保本机服务已启动、`status.ps1` 显示 RUNNING。
-2. 用 cloudflared 建立隧道，得到 `https://<地址>/mcp`。
-3. 在 SullyOS 的 Remote MCP 设置中填写：
-   - **URL**: `https://<地址>/mcp`
-   - **认证**: Bearer Token（从 `.secrets\API_KEY.txt` 复制）
-   - 协议自动为 Streamable HTTP（2025-03-26+）。
-4. AI 会优先调用 `pc_get_context` 感知电脑整体状态。
+## License
+
+DeskSense is released under the MIT License. See [LICENSE](LICENSE).
