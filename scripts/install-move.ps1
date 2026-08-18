@@ -4,8 +4,9 @@
 # 本脚本推导项目根目录、动态发现环境，不硬编码项目路径或用户目录。
 $ErrorActionPreference = 'Stop'
 
-# ---- 1. 推导项目根目录（脚本自身位置向上两级: scripts -> root） ----
-$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# ---- 1. 推导解压目录与项目根目录（archive root -> project -> scripts） ----
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ExtractionRoot = Split-Path -Parent $ProjectRoot
 $HomeDir = $env:USERPROFILE
 if (-not $HomeDir) { $HomeDir = Join-Path $env:HOMEDRIVE $env:HOMEPATH }
 $CfdHome = Join-Path $HomeDir '.cloudflared'
@@ -13,7 +14,8 @@ $LocalOrigin = 'http://127.0.0.1:8765'
 
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host "DeskSense MOVE — install"
-Write-Host "Project root : $Root"
+Write-Host "Extract root : $ExtractionRoot"
+Write-Host "Project root : $ProjectRoot"
 Write-Host "Home dir     : $HomeDir"
 Write-Host "Cfd home     : $CfdHome"
 Write-Host "==============================================" -ForegroundColor Cyan
@@ -31,14 +33,14 @@ if (-not $Py) {
 Write-Host "Python: $Py ($(python --version 2>&1))"
 
 # ---- 3. 创建 .venv 并安装依赖 ----
-$Venv = Join-Path $Root '.venv'
+$Venv = Join-Path $ProjectRoot '.venv'
 $VenvPython = Join-Path $Venv 'Scripts\python.exe'
 if (-not (Test-Path $VenvPython)) {
     Write-Host "Creating venv at $Venv ..."
     python -m venv $Venv
     if (-not (Test-Path $VenvPython)) { Write-Host "ERROR: venv creation failed." -ForegroundColor Red; exit 1 }
 }
-$Req = Join-Path $Root 'requirements.txt'
+$Req = Join-Path $ProjectRoot 'requirements.txt'
 if (Test-Path $Req) {
     Write-Host "Installing dependencies from requirements.txt ..."
     & $VenvPython -m pip install --upgrade pip | Out-Null
@@ -47,26 +49,30 @@ if (Test-Path $Req) {
 } else {
     Write-Host "requirements.txt not found; skipping dependency install." -ForegroundColor Yellow
 }
+& $VenvPython -m pip install -e $ProjectRoot
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: editable project install failed." -ForegroundColor Red; exit 1 }
 
 # ---- 4. 恢复 API_KEY ----
-$SecretsSrc = Join-Path $Root '.secrets'
-$SecretsDst = Join-Path $Root '.secrets'
+$SecretsSrc = Join-Path $ExtractionRoot '.secrets'
+$SecretsDst = Join-Path $ProjectRoot '.secrets'
 $ApiKeySrc = Join-Path $SecretsSrc 'API_KEY.txt'
+$ApiKeyDst = Join-Path $SecretsDst 'API_KEY.txt'
 if (Test-Path $ApiKeySrc) {
     New-Item -ItemType Directory -Force -Path $SecretsDst | Out-Null
-    Write-Host "API key present at $SecretsSrc (restored)."
+    Copy-Item -LiteralPath $ApiKeySrc -Destination $ApiKeyDst -Force
+    Write-Host "API key restored to $ApiKeyDst."
 } else {
     New-Item -ItemType Directory -Force -Path $SecretsDst | Out-Null
-    Set-Content -Path $ApiKeySrc -Value '' -Encoding UTF8
+    Set-Content -Path $ApiKeyDst -Value '' -Encoding UTF8
     Write-Host ""
     Write-Host "WARNING: .secrets\API_KEY.txt was not found in the archive." -ForegroundColor Yellow
-    Write-Host "Place your Bearer token into: $ApiKeySrc" -ForegroundColor Yellow
+    Write-Host "Place your Bearer token into: $ApiKeyDst" -ForegroundColor Yellow
     Write-Host "The token is read from this file at server start. Add it before relying on auth." -ForegroundColor Yellow
     Write-Host ""
 }
 
 # ---- 5. 恢复 Tunnel credentials 到 ~/.cloudflared ----
-$CfdArchive = Join-Path $Root 'cloudflared'
+$CfdArchive = Join-Path $ExtractionRoot 'cloudflared'
 if (Test-Path $CfdArchive) {
     New-Item -ItemType Directory -Force -Path $CfdHome | Out-Null
     Get-ChildItem -Path $CfdArchive -File | ForEach-Object {
@@ -161,15 +167,15 @@ function Register-Task {
 
 # DeskSense MCP
 $Python = Join-Path $Venv 'Scripts\python.exe'
-$actionMcp = New-ScheduledTaskAction -Execute $Python -Argument '-m desksense.server' -WorkingDirectory $Root
+$actionMcp = New-ScheduledTaskAction -Execute $Python -Argument '-m desksense.server' -WorkingDirectory $ProjectRoot
 Register-Task -TaskName 'DeskSense MCP' -Action $actionMcp -Desc 'DeskSense MCP user-login autostart'
 
 # Cloudflared Named Tunnel (复用导出的 start-named-tunnel.ps1)
-$TunnelScript = Join-Path $Root 'scripts\start-named-tunnel.ps1'
+$TunnelScript = Join-Path $ProjectRoot 'scripts\start-named-tunnel.ps1'
 if (Test-Path $TunnelScript) {
     $actionTunnel = New-ScheduledTaskAction -Execute 'powershell.exe' `
         -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$TunnelScript`"" `
-        -WorkingDirectory $Root
+        -WorkingDirectory $ProjectRoot
     Register-Task -TaskName 'Cloudflared Named Tunnel' -Action $actionTunnel -Desc 'Cloudflared Named Tunnel user-login autostart'
 } else {
     Write-Host "WARNING: scripts\start-named-tunnel.ps1 not found; tunnel autostart not registered." -ForegroundColor Yellow
@@ -178,10 +184,10 @@ if (Test-Path $TunnelScript) {
 # ---- 10. 启动 DeskSense MCP server ----
 Write-Host ""
 Write-Host "Starting DeskSense MCP server ..."
-$Logs = Join-Path $Root 'logs'
+$Logs = Join-Path $ProjectRoot 'logs'
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 Start-Process -FilePath $Python -ArgumentList @('-m','desksense.server') `
-    -WorkingDirectory $Root -WindowStyle Hidden `
+    -WorkingDirectory $ProjectRoot -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $Logs 'stdout.log') `
     -RedirectStandardError (Join-Path $Logs 'stderr.log')
 Start-Sleep -Seconds 3

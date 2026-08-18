@@ -148,4 +148,4 @@ Write-Host ''
 Write-Host 'Manifest:'
 Get-Content -Raw $Manifest
 Write-Host ''
-Write-Host 'Next: copy this ZIP to the new PC, extract it, then run scripts\install-move.ps1 from the extracted folder.' -ForegroundColor Cyan
+Write-Host 'Next: copy this ZIP to the new PC, extract it, then run project\scripts\install-move.ps1.' -ForegroundColor Cyan

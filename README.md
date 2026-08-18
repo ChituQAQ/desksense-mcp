@@ -63,7 +63,7 @@ From the repository root in PowerShell:
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:PYTHONPATH = "src"
-\.\.venv\Scripts\python.exe -m desksense.server
+.\.venv\Scripts\python.exe -m desksense.server
 ```
 
 For a complete node installation, including token generation, CORS, tunnel configuration, and autostart tasks:
@@ -127,7 +127,7 @@ Interactive logon is intentional because desktop sensing requires the user's Win
 ## Development
 
 ```powershell
-\.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 Source is under `src/desksense`; tests are under `tests`. The server can be run locally with `PYTHONPATH=src` as shown above.

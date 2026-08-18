@@ -23,7 +23,7 @@ Treat it like a password file. Do not commit it to GitHub, upload it to a public
 
 ## Install on the new PC
 
-Extract the archive into a private directory, open PowerShell in the extracted project root, and run:
+Extract the archive into a private directory, open PowerShell in its `project` directory, and run:
 
 ```powershell
 .\scripts\install-move.ps1
