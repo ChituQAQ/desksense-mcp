@@ -44,7 +44,6 @@ $DatabasePath = Join-Path $DataDir 'pc_sense.db'
 $LogsDir = Join-Path $Root 'logs'
 $VenvDir = Join-Path $Root '.venv'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
-$VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
 $RequirementsPath = Join-Path $Root 'requirements.txt'
 $CloudflaredHome = Join-Path $UserHome '.cloudflared'
 $TunnelConfigPath = Join-Path $CloudflaredHome "$TunnelName.yml"
@@ -80,10 +79,6 @@ if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
         throw 'Virtual environment creation failed.'
     }
 }
-if (-not (Test-Path -LiteralPath $VenvPythonw -PathType Leaf)) {
-    throw "The virtual environment does not contain pythonw.exe: $VenvPythonw"
-}
-
 Write-Host 'Installing project dependencies...'
 if (Test-Path -LiteralPath $RequirementsPath -PathType Leaf) {
     & $VenvPython -m pip install -r $RequirementsPath
@@ -289,12 +284,15 @@ function Register-InteractiveTask {
     Write-Host "Registered user-login task: $Name" -ForegroundColor Green
 }
 
-$McpAction = New-ScheduledTaskAction -Execute $VenvPythonw -Argument '-m pc_sense.server' -WorkingDirectory $Root
 $Wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+$McpLauncher = Join-Path $PSScriptRoot 'run-pc-sense-hidden.vbs'
 $TunnelLauncher = Join-Path $PSScriptRoot 'run-cloudflared-hidden.vbs'
 if (-not (Test-Path -LiteralPath $Wscript -PathType Leaf)) { throw "wscript.exe was not found: $Wscript" }
+if (-not (Test-Path -LiteralPath $McpLauncher -PathType Leaf)) { throw "MCP launcher was not found: $McpLauncher" }
 if (-not (Test-Path -LiteralPath $TunnelLauncher -PathType Leaf)) { throw "Tunnel launcher was not found: $TunnelLauncher" }
+$McpArguments = "//B //NoLogo `"$McpLauncher`" `"$VenvPython`" `"$Root`""
 $TunnelArguments = "//B //NoLogo `"$TunnelLauncher`" `"$Cloudflared`" `"$TunnelConfigPath`" `"$TunnelId`""
+$McpAction = New-ScheduledTaskAction -Execute $Wscript -Argument $McpArguments -WorkingDirectory $Root
 $TunnelAction = New-ScheduledTaskAction -Execute $Wscript -Argument $TunnelArguments -WorkingDirectory $Root
 Register-InteractiveTask $TaskMcp $McpAction 'DeskSense Home MCP user-login autostart'
 Register-InteractiveTask $TaskTunnel $TunnelAction 'Cloudflared independent Home Named Tunnel user-login autostart'
