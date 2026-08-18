@@ -39,7 +39,7 @@ Regular users do not need Git, pip knowledge, or manual venv, config, token, or 
 
 1. Open [GitHub Releases](https://github.com/ChituQAQ/desksense-mcp/releases).
 2. Download `DeskSense-v1.0.1.zip`.
-3. Extract it to a stable directory that will not be moved or deleted, such as `C:\Apps\DeskSense`.
+3. Extract it to a stable directory that will not be moved or deleted, such as `D:\Apps\DeskSense`.
 4. Open PowerShell in the extracted directory and run one command.
 
 Windows execution policy or the ZIP download mark may block direct `.ps1` execution. This command bypasses the policy only for this PowerShell process and does not change the system policy:
