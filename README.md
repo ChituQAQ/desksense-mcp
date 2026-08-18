@@ -39,7 +39,7 @@ SullyOS 是经过测试的客户端示例，不是必需或专用客户端。
 
 1. 打开 [GitHub Releases](https://github.com/ChituQAQ/desksense-mcp/releases)。
 2. 下载 `DeskSense-v1.0.1.zip`。
-3. 解压到不会被移动或删除的稳定目录，例如 `C:\Apps\DeskSense`。
+3. 解压到不会被移动或删除的稳定目录，例如 `D:\Apps\DeskSense`。
 4. 在解压目录打开 PowerShell，运行下面的一条命令。
 
 Windows 的脚本执行策略或 ZIP 下载标记可能阻止直接运行 `.ps1`。推荐命令已经用 `-ExecutionPolicy Bypass` 仅为本次进程绕过限制，不会修改系统策略：
