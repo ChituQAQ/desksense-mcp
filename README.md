@@ -118,7 +118,7 @@ Interactive logon is intentional because desktop sensing requires the user's Win
 ## Troubleshooting
 
 - Check local health: `Invoke-WebRequest http://127.0.0.1:8765/healthz`
-- Check task and process state: `.\scripts\status.ps1`
+- Check the port 8765 listener and local health endpoint: `.\scripts\status.ps1`
 - Review files under `logs\` (never share `.secrets\`)
 - Confirm `PYTHONPATH=src` when running directly from a checkout
 - Confirm the client sends `Authorization: Bearer <token>` and uses `/mcp`

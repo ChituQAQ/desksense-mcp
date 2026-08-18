@@ -107,7 +107,7 @@ def _create_server(cfg: Config, history: FocusHistory) -> MCPServer:
         description="Windows 本机电脑感知 MCP（只读）。可查询当前前台程序、打开的窗口、闲置时间、系统负载与焦点切换历史。",
     )
 
-    @server.tool(name="pc_get_context", description="【综合工具】一次返回当前电脑整体状态：正在使用的前台应用、窗口标题、闲置状态、主要打开应用（最多约 15 个）、CPU、内存、开机时间与磁盘概览。当用户谈论“我现在在电脑上做什么”“刚才在干什么”或询问电脑当前状态而未指定具体细节时，一条调用即可给出全局快照。适合在回答明显依赖用户当前电脑现场时作为默认入口。")
+    @server.tool(name="pc_get_context", description="【综合工具】一次返回当前电脑整体状态：正在使用的前台应用、窗口标题、闲置状态、主要打开应用（最多约 15 个）、CPU、内存与开机时间。当用户谈论“我现在在电脑上做什么”“刚才在干什么”或询问电脑当前状态而未指定具体细节时，一条调用即可给出全局快照。适合在回答明显依赖用户当前电脑现场时作为默认入口。")
     def _impl_get_context() -> Dict[str, Any]:
         return pc_get_context(cfg, history)
 
