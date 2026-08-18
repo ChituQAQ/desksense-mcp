@@ -1,4 +1,4 @@
-"""PC Sense MCP — Windows 本机“电脑感知” MCP 服务。
+"""DeskSense — Windows 本机“电脑感知” MCP 服务。
 
 只读感知电脑状态（前台窗口 / 打开应用 / 闲置 / 系统负载 / 焦点历史），
 不提供任何远程控制能力。

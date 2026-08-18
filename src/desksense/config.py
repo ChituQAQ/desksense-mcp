@@ -1,4 +1,4 @@
-"""PC Sense MCP 配置模块。
+"""DeskSense 配置模块。
 
 从 config.json 读取配置，并提供合理的默认值。
 不包含任何密钥（API Key 存放在 .secrets/API_KEY.txt，绝不进 config.json）。
@@ -122,11 +122,16 @@ def load_config(path: Path | None = None) -> Config:
 
 
 def api_key_from_env_or_file(cfg: Config) -> str | None:
-    """优先从环境变量 API_KEY 读取；否则从 .secrets/API_KEY.txt 读取。
+    """优先从环境变量读取 API Key；否则从 .secrets/API_KEY.txt 读取。
 
+    环境变量优先级：DESKSENSE_API_KEY > PC_SENSE_API_KEY（兼容旧部署）> API_KEY。
     返回 None 表示未配置。
     """
-    key = os.environ.get("PC_SENSE_API_KEY") or os.environ.get("API_KEY")
+    key = (
+        os.environ.get("DESKSENSE_API_KEY")
+        or os.environ.get("PC_SENSE_API_KEY")
+        or os.environ.get("API_KEY")
+    )
     if key:
         return key.strip()
     path = cfg.api_key_path

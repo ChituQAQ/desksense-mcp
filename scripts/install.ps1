@@ -1,35 +1,39 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$Hostname,
 
     [Parameter(Mandatory = $true)]
-    [string]$TunnelName
+    [string]$TunnelName,
+
+    [string]$AllowedOrigin
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$ExpectedHostname = 'home-pc.sullyos.ccwu.cc'
-$ExpectedTunnelName = 'pc-sense-home'
-$SullyOrigin = 'https://qegj567-cloud.github.io'
 $LocalOrigin = 'http://127.0.0.1:8765'
-$TaskMcp = 'PC Sense MCP'
+$TaskMcp = 'DeskSense MCP'
 $TaskTunnel = 'Cloudflared Named Tunnel'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 if ($env:OS -ne 'Windows_NT') {
-    throw 'ADD installation is supported only on Windows.'
+    throw 'DeskSense installation is supported only on Windows.'
 }
 
 $Hostname = $Hostname.Trim().ToLowerInvariant()
 $TunnelName = $TunnelName.Trim()
-if ($Hostname -ne $ExpectedHostname -or $TunnelName -ne $ExpectedTunnelName) {
-    throw "This MVP is locked to hostname '$ExpectedHostname' and tunnel '$ExpectedTunnelName'."
+if (-not $Hostname) { throw 'A non-empty Hostname is required.' }
+if (-not $TunnelName) { throw 'A non-empty TunnelName is required.' }
+
+$PublicOrigin = "https://$Hostname"
+$AllowedOrigins = @($PublicOrigin)
+if ($AllowedOrigin) {
+    $AllowedOrigin = $AllowedOrigin.Trim()
+    if ($AllowedOrigins -notcontains $AllowedOrigin) { $AllowedOrigins += $AllowedOrigin }
 }
-if ($Hostname -eq 'pc.sullyos.ccwu.cc' -or $TunnelName -eq 'pc-sense-mcp') {
-    throw 'Refusing to target the Work PC hostname or tunnel.'
-}
+# Origin used for the CORS round-trip verification; always one of the configured origins.
+$CorsTestOrigin = if ($AllowedOrigin) { $AllowedOrigin } else { $PublicOrigin }
 
 $Root = Split-Path -Parent $PSScriptRoot
 $UserHome = $env:USERPROFILE
@@ -47,12 +51,12 @@ $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $RequirementsPath = Join-Path $Root 'requirements.txt'
 $CloudflaredHome = Join-Path $UserHome '.cloudflared'
 $TunnelConfigPath = Join-Path $CloudflaredHome "$TunnelName.yml"
-$PublicOrigin = "https://$Hostname"
 
-Write-Host 'DeskSense ADD Home PC installer' -ForegroundColor Cyan
+Write-Host 'DeskSense installer' -ForegroundColor Cyan
 Write-Host "Project root : $Root"
 Write-Host "Hostname     : $Hostname"
 Write-Host "Tunnel       : $TunnelName"
+if ($AllowedOrigin) { Write-Host "AllowedOrigin: $AllowedOrigin" }
 
 # Discover Python without assuming its installation directory.
 $PythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
@@ -87,24 +91,24 @@ if (Test-Path -LiteralPath $RequirementsPath -PathType Leaf) {
 & $VenvPython -m pip install -e $Root
 if ($LASTEXITCODE -ne 0) { throw 'Editable project installation failed.' }
 
-# A token already paired with a non-Home config is presumed to belong to another node.
+# A token already paired with a different node config is presumed to belong to another deployment.
 $ExistingConfig = $null
-$HomeConfigured = $false
+$NodeConfigured = $false
 if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
     try {
         $ExistingConfig = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $ExistingOrigins = @($ExistingConfig.allowed_origins)
-        $HomeConfigured = $ExistingOrigins -contains $PublicOrigin
+        $NodeConfigured = $ExistingOrigins -contains $PublicOrigin
     } catch {
         throw "Existing config is not valid UTF-8 JSON: $ConfigPath"
     }
 }
 $ApiKeyExists = Test-Path -LiteralPath $ApiKeyPath -PathType Leaf
-if ($ApiKeyExists -and -not $HomeConfigured) {
-    throw "An existing token is not identified as a Home deployment. Refusing to overwrite or reuse it: $ApiKeyPath"
+if ($ApiKeyExists -and -not $NodeConfigured) {
+    throw "An existing token is not identified as a deployment for '$Hostname'. Refusing to overwrite or reuse it: $ApiKeyPath"
 }
-if ((Test-Path -LiteralPath $DatabasePath -PathType Leaf) -and -not $HomeConfigured) {
-    throw "An existing database is not identified as Home data. Move it aside before ADD installation: $DatabasePath"
+if ((Test-Path -LiteralPath $DatabasePath -PathType Leaf) -and -not $NodeConfigured) {
+    throw "An existing database is not identified as a deployment for '$Hostname'. Move it aside before installation: $DatabasePath"
 }
 
 New-Item -ItemType Directory -Force -Path $SecretsDir, $DataDir, $LogsDir | Out-Null
@@ -114,13 +118,13 @@ if (-not $ApiKeyExists) {
     try { $Rng.GetBytes($RandomBytes) } finally { $Rng.Dispose() }
     $ApiKey = ([System.BitConverter]::ToString($RandomBytes)).Replace('-', '').ToLowerInvariant()
     [System.IO.File]::WriteAllText($ApiKeyPath, $ApiKey + "`n", $Utf8NoBom)
-    Write-Host 'Generated a new Home bearer token.' -ForegroundColor Green
+    Write-Host 'Generated a new bearer token.' -ForegroundColor Green
 } else {
     $ExistingKey = ([System.IO.File]::ReadAllText($ApiKeyPath, $Utf8NoBom)).Trim()
     if ($ExistingKey -notmatch '^[0-9a-fA-F]{64}$') {
-        throw "Existing Home token has an unexpected format: $ApiKeyPath"
+        throw "Existing token has an unexpected format: $ApiKeyPath"
     }
-    Write-Host 'Existing Home bearer token retained.'
+    Write-Host 'Existing bearer token retained.'
 }
 
 if (-not $ExistingConfig) { $ExistingConfig = New-Object PSObject }
@@ -134,10 +138,10 @@ function Set-ConfigProperty {
 }
 Set-ConfigProperty $ExistingConfig 'host' '127.0.0.1'
 Set-ConfigProperty $ExistingConfig 'port' 8765
-Set-ConfigProperty $ExistingConfig 'allowed_origins' @($PublicOrigin, $SullyOrigin)
+Set-ConfigProperty $ExistingConfig 'allowed_origins' $AllowedOrigins
 $ConfigJson = $ExistingConfig | ConvertTo-Json -Depth 20
 [System.IO.File]::WriteAllText($ConfigPath, $ConfigJson + "`n", $Utf8NoBom)
-Write-Host "Wrote Home config: $ConfigPath"
+Write-Host "Wrote config: $ConfigPath"
 
 # Discover cloudflared from PATH and per-user/system locations.
 $Cloudflared = $null
@@ -223,7 +227,7 @@ if (-not $TunnelListResult.Success) {
 $MatchingTunnels = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq $TunnelName })
 if ($MatchingTunnels.Count -gt 1) { throw "More than one tunnel is named '$TunnelName'." }
 if ($MatchingTunnels.Count -eq 0) {
-    Write-Host "Creating independent Named Tunnel: $TunnelName"
+    Write-Host "Creating Named Tunnel: $TunnelName"
     $CreateCommand = Invoke-CloudflaredManagement @('tunnel', 'create', $TunnelName)
     if ($CreateCommand.ExitCode -ne 0) { throw "Failed to create Named Tunnel '$TunnelName'." }
     $TunnelListResult = Read-TunnelList
@@ -231,24 +235,20 @@ if ($MatchingTunnels.Count -eq 0) {
     $MatchingTunnels = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq $TunnelName })
     if ($MatchingTunnels.Count -ne 1) { throw 'The newly created tunnel could not be identified uniquely.' }
 } else {
-    Write-Host "Existing Home tunnel retained: $TunnelName"
+    Write-Host "Existing tunnel retained: $TunnelName"
 }
 
 $TunnelId = [string]$MatchingTunnels[0].id
-if (-not $TunnelId) { throw 'The Home tunnel has no tunnel ID.' }
-$WorkTunnel = @($TunnelListResult.Tunnels | Where-Object { $_.name -eq 'pc-sense-mcp' })
-if ($WorkTunnel.Count -gt 0 -and [string]$WorkTunnel[0].id -eq $TunnelId) {
-    throw 'Home and Work resolved to the same tunnel ID; refusing to continue.'
-}
+if (-not $TunnelId) { throw 'The tunnel has no tunnel ID.' }
 
 $CredentialsPath = Join-Path $CloudflaredHome "$TunnelId.json"
 if (-not (Test-Path -LiteralPath $CredentialsPath -PathType Leaf)) {
-    throw "Home tunnel credentials are missing. The Work credentials will not be used: $CredentialsPath"
+    throw "Tunnel credentials are missing: $CredentialsPath"
 }
 
 Write-Host "Creating/updating DNS route for $Hostname"
 $RouteCommand = Invoke-CloudflaredManagement @('tunnel', 'route', 'dns', '--overwrite-dns', $TunnelId, $Hostname)
-if ($RouteCommand.ExitCode -ne 0) { throw "Failed to route $Hostname to the Home tunnel." }
+if ($RouteCommand.ExitCode -ne 0) { throw "Failed to route $Hostname to the tunnel." }
 
 $YamlCredentialsPath = $CredentialsPath.Replace("'", "''")
 $TunnelYaml = @"
@@ -262,7 +262,7 @@ ingress:
   - service: http_status:404
 "@
 [System.IO.File]::WriteAllText($TunnelConfigPath, $TunnelYaml + "`n", $Utf8NoBom)
-Write-Host "Wrote Home tunnel config: $TunnelConfigPath"
+Write-Host "Wrote tunnel config: $TunnelConfigPath"
 
 foreach ($CommandName in @('Register-ScheduledTask', 'New-ScheduledTaskAction', 'New-ScheduledTaskPrincipal')) {
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
@@ -285,7 +285,7 @@ function Register-InteractiveTask {
 }
 
 $Wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
-$McpLauncher = Join-Path $PSScriptRoot 'run-pc-sense-hidden.vbs'
+$McpLauncher = Join-Path $PSScriptRoot 'run-desksense-hidden.vbs'
 $TunnelLauncher = Join-Path $PSScriptRoot 'run-cloudflared-hidden.vbs'
 if (-not (Test-Path -LiteralPath $Wscript -PathType Leaf)) { throw "wscript.exe was not found: $Wscript" }
 if (-not (Test-Path -LiteralPath $McpLauncher -PathType Leaf)) { throw "MCP launcher was not found: $McpLauncher" }
@@ -294,13 +294,13 @@ $McpArguments = "//B //NoLogo `"$McpLauncher`" `"$VenvPython`" `"$Root`""
 $TunnelArguments = "//B //NoLogo `"$TunnelLauncher`" `"$Cloudflared`" `"$TunnelConfigPath`" `"$TunnelId`""
 $McpAction = New-ScheduledTaskAction -Execute $Wscript -Argument $McpArguments -WorkingDirectory $Root
 $TunnelAction = New-ScheduledTaskAction -Execute $Wscript -Argument $TunnelArguments -WorkingDirectory $Root
-Register-InteractiveTask $TaskMcp $McpAction 'DeskSense Home MCP user-login autostart'
-Register-InteractiveTask $TaskTunnel $TunnelAction 'Cloudflared independent Home Named Tunnel user-login autostart'
+Register-InteractiveTask $TaskMcp $McpAction 'DeskSense MCP user-login autostart'
+Register-InteractiveTask $TaskTunnel $TunnelAction 'Cloudflared Named Tunnel user-login autostart'
 
 $Listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
 if (-not $Listener) {
     Start-ScheduledTask -TaskName $TaskMcp
-    Write-Host 'Started DeskSense Home MCP task.'
+    Write-Host 'Started DeskSense MCP task.'
 } else {
     Write-Host "Port 8765 is already listening (PID $($Listener[0].OwningProcess)); not starting a duplicate server."
 }
@@ -309,15 +309,15 @@ $MatchingConnectors = @(Get-CimInstance Win32_Process -Filter "Name = 'cloudflar
     Where-Object { $_.CommandLine -and ($_.CommandLine.Contains($TunnelConfigPath) -or $_.CommandLine.Contains($TunnelId)) })
 if ($MatchingConnectors.Count -eq 0) {
     Start-ScheduledTask -TaskName $TaskTunnel
-    Write-Host 'Started the Home cloudflared task.'
+    Write-Host 'Started the cloudflared task.'
 } elseif ($MatchingConnectors.Count -eq 1) {
-    Write-Host 'The Home cloudflared connector is already running; not starting a duplicate.'
+    Write-Host 'The cloudflared connector is already running; not starting a duplicate.'
 } else {
-    throw 'Multiple Home cloudflared connector processes are running.'
+    throw 'Multiple cloudflared connector processes are running.'
 }
 
 # The verifier reads the token file itself and never prints the token. Local requests ignore proxy environment variables.
-$VerifierPath = Join-Path $env:TEMP ("pc-sense-add-verify-{0}.py" -f ([Guid]::NewGuid().ToString('N')))
+$VerifierPath = Join-Path $env:TEMP ("desksense-verify-{0}.py" -f ([Guid]::NewGuid().ToString('N')))
 $Verifier = @'
 import asyncio
 import sys
@@ -391,7 +391,7 @@ async def main():
     for _ in range(30):
         try:
             await verify_http(public_base, token, origin, False)
-            print("Home local/public MCP and CORS verification passed (7 tools).")
+            print("Local/public MCP and CORS verification passed (7 tools).")
             return
         except Exception as exc:
             last_error = exc
@@ -402,13 +402,13 @@ asyncio.run(main())
 '@
 [System.IO.File]::WriteAllText($VerifierPath, $Verifier, $Utf8NoBom)
 try {
-    & $VenvPython $VerifierPath $ApiKeyPath $SullyOrigin $PublicOrigin
-    if ($LASTEXITCODE -ne 0) { throw 'Home local/public verification failed.' }
+    & $VenvPython $VerifierPath $ApiKeyPath $CorsTestOrigin $PublicOrigin
+    if ($LASTEXITCODE -ne 0) { throw 'Local/public verification failed.' }
 } finally {
     if (Test-Path -LiteralPath $VerifierPath) { [System.IO.File]::Delete($VerifierPath) }
 }
 
 Write-Host ''
-Write-Host 'DeskSense Home ADD installation complete.' -ForegroundColor Green
-Write-Host "Home MCP URL : $PublicOrigin/mcp"
-Write-Host "Token file   : $ApiKeyPath"
+Write-Host 'DeskSense installation complete.' -ForegroundColor Green
+Write-Host "MCP URL    : $PublicOrigin/mcp"
+Write-Host "Token file : $ApiKeyPath"

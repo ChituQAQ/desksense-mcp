@@ -1,4 +1,4 @@
-﻿# PC Sense MCP — 状态脚本
+﻿# DeskSense — 状态脚本
 # 用法: .\scripts\status.ps1
 $conns = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
 if ($conns) {

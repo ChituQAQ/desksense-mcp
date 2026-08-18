@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pc_sense.windows_idle import idle_state_for
+from desksense.windows_idle import idle_state_for
 
 
 def test_active():

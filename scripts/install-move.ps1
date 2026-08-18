@@ -1,7 +1,7 @@
 ﻿# DeskSense MOVE — 迁移安装 (在新电脑解压目录中运行)
 # 用法: 解压 desksense-move-<ts>.zip 后，在解压出的项目根目录运行:
 #        .\scripts\install-move.ps1
-# 本脚本推导项目根目录、动态发现环境，不硬编码 D:\Projects 或 Administrator。
+# 本脚本推导项目根目录、动态发现环境，不硬编码项目路径或用户目录。
 $ErrorActionPreference = 'Stop'
 
 # ---- 1. 推导项目根目录（脚本自身位置向上两级: scripts -> root） ----
@@ -9,7 +9,6 @@ $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $HomeDir = $env:USERPROFILE
 if (-not $HomeDir) { $HomeDir = Join-Path $env:HOMEDRIVE $env:HOMEPATH }
 $CfdHome = Join-Path $HomeDir '.cloudflared'
-$CfdTunnelName = 'pc-sense-mcp'
 $LocalOrigin = 'http://127.0.0.1:8765'
 
 Write-Host "==============================================" -ForegroundColor Cyan
@@ -101,21 +100,23 @@ Write-Host "cloudflared: $Cf"
 # 若导出的 config.yml 已存在且含 machine-specific 路径，重写为动态路径。
 $CfgPath = Join-Path $CfdHome 'config.yml'
 $CfdCredJson = $null
-# 从导出/现有的 config.yml 中读取 hostname，而不是硬编码
-$CfgHostname = 'pc.sullyos.ccwu.cc'
+# 从导出/现有的 config.yml 中读取 hostname 与 tunnel，而不是硬编码
+$CfgHostname = ''
+$CfgTunnel = ''
 $ArchivedCfg = Join-Path $CfdArchive 'config.yml'
 $CfgToRead = $ArchivedCfg
 if (-not (Test-Path $CfgToRead)) { $CfgToRead = $CfgPath }
 if (Test-Path $CfgToRead) {
     $oldCfgRaw = Get-Content -Raw -Path $CfgToRead
-    if ($oldCfgRaw -match '^\s*-\s+hostname:\s*(\S+)') { $CfgHostname = $Matches[1] }
+    if ($oldCfgRaw -match '(?m)^\s*-\s+hostname:\s*(\S+)') { $CfgHostname = $Matches[1] }
+    if ($oldCfgRaw -match '(?m)^\s*tunnel:\s*(\S+)') { $CfgTunnel = $Matches[1] }
 }
 Get-ChildItem -Path $CfdHome -File -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.Name -ne 'cert.pem') { $CfdCredJson = $_.FullName }
 }
 if ($CfdCredJson) {
     $CfgContent = @"
-tunnel: $CfdTunnelName
+tunnel: $CfgTunnel
 credentials-file: $CfdCredJson
 protocol: http2
 
@@ -158,10 +159,10 @@ function Register-Task {
     Write-Host "Registered autostart task: $TaskName" -ForegroundColor Green
 }
 
-# PC Sense MCP
+# DeskSense MCP
 $Python = Join-Path $Venv 'Scripts\python.exe'
-$actionMcp = New-ScheduledTaskAction -Execute $Python -Argument '-m pc_sense.server' -WorkingDirectory $Root
-Register-Task -TaskName 'PC Sense MCP' -Action $actionMcp -Desc 'DeskSense MCP user-login autostart'
+$actionMcp = New-ScheduledTaskAction -Execute $Python -Argument '-m desksense.server' -WorkingDirectory $Root
+Register-Task -TaskName 'DeskSense MCP' -Action $actionMcp -Desc 'DeskSense MCP user-login autostart'
 
 # Cloudflared Named Tunnel (复用导出的 start-named-tunnel.ps1)
 $TunnelScript = Join-Path $Root 'scripts\start-named-tunnel.ps1'
@@ -169,17 +170,17 @@ if (Test-Path $TunnelScript) {
     $actionTunnel = New-ScheduledTaskAction -Execute 'powershell.exe' `
         -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$TunnelScript`"" `
         -WorkingDirectory $Root
-    Register-Task -TaskName 'Cloudflared Named Tunnel' -Action $actionTunnel -Desc 'Cloudflared named tunnel pc-sense-mcp autostart'
+    Register-Task -TaskName 'Cloudflared Named Tunnel' -Action $actionTunnel -Desc 'Cloudflared Named Tunnel user-login autostart'
 } else {
     Write-Host "WARNING: scripts\start-named-tunnel.ps1 not found; tunnel autostart not registered." -ForegroundColor Yellow
 }
 
-# ---- 10. 启动 PC Sense MCP server ----
+# ---- 10. 启动 DeskSense MCP server ----
 Write-Host ""
 Write-Host "Starting DeskSense MCP server ..."
 $Logs = Join-Path $Root 'logs'
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
-Start-Process -FilePath $Python -ArgumentList @('-m','pc_sense.server') `
+Start-Process -FilePath $Python -ArgumentList @('-m','desksense.server') `
     -WorkingDirectory $Root -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $Logs 'stdout.log') `
     -RedirectStandardError (Join-Path $Logs 'stderr.log')
@@ -197,4 +198,4 @@ if (Test-Path $TunnelScript) {
 Write-Host ""
 Write-Host "DeskSense MOVE install complete." -ForegroundColor Green
 Write-Host "Local health : http://127.0.0.1:8765/healthz"
-Write-Host "Public MCP   : https://pc.sullyos.ccwu.cc/mcp"
+if ($CfgHostname) { Write-Host "Public MCP   : https://$CfgHostname/mcp" }

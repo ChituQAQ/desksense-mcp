@@ -39,8 +39,8 @@ foreach ($it in $Items) {
     }
 }
 
-# 包源码目录 (pc_sense / src 等常见布局)
-foreach ($pkg in @('pc_sense','src','server.py','main.py')) {
+# 包源码目录 (desksense / src 等常见布局；pc_sense 保留以兼容旧归档)
+foreach ($pkg in @('desksense','pc_sense','src','server.py','main.py')) {
     $p = Join-Path $Root $pkg
     if (Test-Path $p) {
         Copy-Item -Path $p -Destination $ProjectStaging -Recurse -Force

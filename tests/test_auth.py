@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pc_sense.auth import check_token, extract_bearer, generate_api_key
-from pc_sense.config import Config
+from desksense.auth import check_token, extract_bearer, generate_api_key
+from desksense.config import Config
 
 
 def _cfg_with_key(key: str) -> Config:
@@ -45,7 +45,7 @@ def test_check_token(tmp_path, monkeypatch):
 
 
 def test_check_token_empty_no_key(tmp_path, monkeypatch):
-    import pc_sense.auth as auth_mod
+    import desksense.auth as auth_mod
     monkeypatch.delenv("PC_SENSE_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY", raising=False)
     # 模拟无可用 key

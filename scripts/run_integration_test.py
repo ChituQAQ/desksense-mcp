@@ -7,7 +7,7 @@
   - 未授权访问应 401（单独的 HTTP 断言）
 
 运行前需启动服务：
-  cd pc-sense-mcp && .\\scripts\\start.ps1
+  cd desksense-mcp && .\\scripts\\start.ps1
 用法:
   PYTHONPATH=src .venv\\Scripts\\python.exe scripts\\run_integration_test.py
 """

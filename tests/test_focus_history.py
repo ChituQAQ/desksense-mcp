@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pc_sense.focus_history import FocusHistory
+from desksense.focus_history import FocusHistory
 
 
 def test_insert_and_query(tmp_path):

@@ -1,4 +1,4 @@
-"""PC Sense MCP 鉴权模块。
+"""DeskSense 鉴权模块。
 
 使用 Bearer Token，安全字符串比较（hmac.compare_digest）。
 API Key 只从环境变量或 .secrets/API_KEY.txt 读取，绝不写进代码。

@@ -54,7 +54,7 @@ ZIP 包含敏感文件（API_KEY、Tunnel credentials），**不要提交 git、
 
 脚本会：
 
-1. 从自身位置推导项目根目录（不硬编码 `D:\Projects`，不硬编码 `Administrator`）
+1. 从自身位置推导项目根目录（不硬编码项目路径或用户目录）
 2. 动态发现 `HOME` / `USERPROFILE`
 3. 动态发现 `cloudflared.exe`（Program Files、Program Files (x86)、`~/.cloudflared`、PATH）
 4. 检查 Python
@@ -98,7 +98,7 @@ YES
 ## 验证清单（新电脑上建议执行）
 
 - 本地：`Invoke-WebRequest http://127.0.0.1:8765/healthz` → 200
-- 公网：`curl https://pc.sullyos.ccwu.cc/mcp` → 可达（origin `http://127.0.0.1:8765`）
+- 公网：`curl https://<your-public-hostname>/mcp` → 可达（origin `http://127.0.0.1:8765`）
 - `scripts/start.ps1` / `scripts/stop.ps1` 可用
 
 ---
@@ -107,5 +107,5 @@ YES
 
 - Windows 系统代理 / v2rayN 可能让 Python `httpx` 请求 `localhost` 产生假 `503`；
   本地 Python 验证请用 `trust_env=False`，或直接用 `curl`。
-- Named Tunnel 名称 `pc-sense-mcp`、公网 hostname `pc.sullyos.ccwu.cc`、Bearer token 在迁移前后保持不变。
+- Named Tunnel 名称 `pc-sense-mcp`、公网 hostname `<your-public-hostname>`、Bearer token 在迁移前后保持不变。
 - 迁移完成后，旧电脑不再运行 DeskSense / cloudflared。

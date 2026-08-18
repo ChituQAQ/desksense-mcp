@@ -1,5 +1,5 @@
 [project]
-name = "pc-sense-mcp"
+name = "desksense-mcp"
 version = "1.0.0"
 description = "Windows 本机电脑感知 MCP（只读）— Streamable HTTP"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-pc-sense = "pc_sense.server:main"
+desksense = "desksense.server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

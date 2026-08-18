@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pc_sense.config import Config, load_config
+from desksense.config import Config, load_config
 
 
 def test_defaults():

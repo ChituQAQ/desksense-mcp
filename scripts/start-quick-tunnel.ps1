@@ -1,4 +1,4 @@
-﻿# PC Sense MCP — Cloudflare Quick Tunnel 启动脚本
+﻿# DeskSense — Cloudflare Quick Tunnel 启动脚本
 # 临时公网地址（用于测试），需已安装 cloudflared 或从 pip 获得 cloudflared。
 # 用法: .\scripts\start-quick-tunnel.ps1
 $ErrorActionPreference = 'Stop'

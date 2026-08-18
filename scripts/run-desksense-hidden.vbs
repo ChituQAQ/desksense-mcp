@@ -7,7 +7,7 @@ End If
 Dim shell, command, exitCode
 Set shell = CreateObject("WScript.Shell")
 shell.CurrentDirectory = WScript.Arguments(1)
-command = Quote(WScript.Arguments(0)) & " -m pc_sense.server"
+command = Quote(WScript.Arguments(0)) & " -m desksense.server"
 exitCode = shell.Run(command, 0, True)
 WScript.Quit exitCode
 

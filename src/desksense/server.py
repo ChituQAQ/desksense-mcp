@@ -1,4 +1,4 @@
-"""PC Sense MCP — Streamable HTTP 服务入口。
+"""DeskSense — Streamable HTTP 服务入口。
 
 使用官方 MCP Python SDK (mcp>=2.0) 的 MCPServer + streamable_http_app()。
 
@@ -34,10 +34,10 @@ from .tools import (
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-SERVICE_NAME = "PC Sense MCP"
+SERVICE_NAME = "DeskSense MCP"
 SERVICE_VERSION = "1.0.0"
 
-logger = logging.getLogger("pc_sense")
+logger = logging.getLogger("desksense")
 
 ALLOW_HEADERS = [
     "Content-Type",
@@ -60,7 +60,7 @@ def _configure_logging(cfg: Config) -> None:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     )
-    root = logging.getLogger("pc_sense")
+    root = logging.getLogger("desksense")
     root.setLevel(logging.INFO)
     root.addHandler(handler)
     root.propagate = False

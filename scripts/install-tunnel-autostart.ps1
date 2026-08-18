@@ -20,7 +20,7 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 
 try {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Settings $settings -Principal $principal -Description 'Cloudflared named tunnel pc-sense-mcp autostart' | Out-Null
+        -Settings $settings -Principal $principal -Description 'Cloudflared Named Tunnel user-login autostart' | Out-Null
     Write-Host "Registered autostart task: $TaskName" -ForegroundColor Green
 } catch {
     Write-Host "ERROR: registration failed: $($_.Exception.Message)" -ForegroundColor Red
