@@ -107,10 +107,10 @@ Moving an existing Node's credentials is a separate sensitive workflow documente
 The default installation registers a current-user logon task named `DeskSense MCP`. Its windowless startup chain is:
 
 ```text
-Task Scheduler -> wscript.exe -> run-desksense-hidden.vbs -> python.exe -m desksense.server
+Task Scheduler -> wscript.exe -> run-desksense-hidden.vbs -> powershell.exe -File start.ps1 -Wait -> python.exe -m desksense.server
 ```
 
-Desktop sensing requires the user's interactive session, so the task runs at logon and not as SYSTEM.
+Desktop sensing requires the user's interactive session, so the task runs at logon and not as SYSTEM. The launcher checks the listener process and `/healthz`; another application's listener is a failure, not a successful startup. after an unexpected server exit the launcher itself retries inside the same task every minute, up to three times (Task Scheduler's restart-on-failure policy does not treat a non-zero exit code as a failure, verified on Windows 11 23H2). See `logs\startup.log` for startup failures and `logs\stderr.log` for Python errors; the previous output is kept as `.previous`.
 
 Advanced users can pass `-NoAutostart`. The installer still creates the environment, config, and token and completes verification, but then stops the temporary server and leaves no permanent scheduled task. Start it later with `.\scripts\start.ps1`.
 

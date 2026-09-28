@@ -1,6 +1,6 @@
 # Cloudflared Named Tunnel autostart script (Task Scheduler)
 # Register:  powershell -ExecutionPolicy Bypass -File scripts/install-tunnel-autostart.ps1
-# Idempotent: exits if tunnel is already running (metrics port 20242 occupied).
+# Idempotent: identifies a running connector by its config path, not a metrics port.
 #
 # Tunnel name and hostname are read from the cloudflared config.yml by default,
 # or supplied explicitly via -TunnelName / -ConfigPath. Nothing user-specific
@@ -46,14 +46,17 @@ if (-not $TunnelName) { throw "Unable to determine tunnel name. Pass -TunnelName
 
 $Log = Join-Path $CloudflaredHome 'tunnel.log'
 
-# Idempotency check: is metrics port 20242 already in use?
-$already = Get-NetTCPConnection -LocalPort 20242 -State Listen -ErrorAction SilentlyContinue
-if ($already) {
-    Write-Host "Cloudflared named tunnel already running (PID $($already.OwningProcess))"
+# The metrics endpoint may use any available port; match the actual config instead.
+$Cfg = [System.IO.Path]::GetFullPath($Cfg)
+$ConfigArgument = '(?i)(?:^|\s)--config(?:=|\s+)(?:"' + [regex]::Escape($Cfg) + '"|' + [regex]::Escape($Cfg) + ')(?=\s|$)'
+$already = @(Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" |
+    Where-Object { $_.CommandLine -match $ConfigArgument })
+if ($already.Count -gt 0) {
+    Write-Host "Cloudflared connector already running for this config (PID $($already.ProcessId -join ', ')); this does not verify tunnel readiness."
     exit 0
 }
 
-Start-Process -FilePath $Cf -ArgumentList @('tunnel','--config',$Cfg,'run',$TunnelName) `
+Start-Process -FilePath $Cf -ArgumentList @('tunnel','--config',('"' + $Cfg + '"'),'run',$TunnelName) `
     -WindowStyle Hidden -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
 Start-Sleep -Seconds 4
 Write-Host "Cloudflared named tunnel ($TunnelName) started."

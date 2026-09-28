@@ -107,10 +107,10 @@ Named Tunnel 安装时也可追加同一参数。不要把 `AllowedOrigin` 设�
 默认安装会注册当前用户登录时启动的计划任务 `DeskSense MCP`。无窗口启动链为：
 
 ```text
-Task Scheduler -> wscript.exe -> run-desksense-hidden.vbs -> python.exe -m desksense.server
+Task Scheduler -> wscript.exe -> run-desksense-hidden.vbs -> powershell.exe -File start.ps1 -Wait -> python.exe -m desksense.server
 ```
 
-桌面感知需要当前用户的交互会话，因此任务使用 `AtLogOn`，不以 SYSTEM 身份运行。
+桌面感知需要当前用户的交互会话，因此任务使用 `AtLogOn`，不以 SYSTEM 身份运行。启动器会核对监听进程和 `/healthz`，其他应用占用端口时会失败而不是误报成功；服务异常退出后由启动器在同一任务内每隔 1 分钟自动重试，最多 3 次（计划任务的失败重启策略不把“正常退出但返回非零码”记为失败，已在 Windows 11 23H2 实测确认）。启动失败见 `logs\startup.log`，Python 错误见 `logs\stderr.log`，上次输出保留为 `.previous`。
 
 高级用户可传入 `-NoAutostart`：安装器仍完成环境、配置、token 和验证，但验证后关闭临时服务，不留下后台进程或永久计划任务。之后可手动运行 `.\scripts\start.ps1`。
 

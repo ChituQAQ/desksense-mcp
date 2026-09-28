@@ -122,6 +122,7 @@ https://desksense.example.com/mcp
 Task Scheduler (AtLogOn, current interactive user)
   -> wscript.exe
   -> scripts\run-desksense-hidden.vbs
+  -> powershell.exe -File scripts\start.ps1 -Wait
   -> .venv\Scripts\python.exe -m desksense.server
 ```
 
@@ -157,6 +158,7 @@ Invoke-WebRequest http://127.0.0.1:8765/healthz
 ## 安全说明
 
 - `.secrets\API_KEY.txt` 等同密码。
+- 安装器在创建 token 前收紧 `.secrets`、`data` 的 Windows ACL，仅允许当前用户、SYSTEM 和本地 Administrators；发现重解析点会拒绝执行。已有源码安装可单独运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\protect-private-data.ps1`。这不是对管理员或可修改程序目录的恶意用户的隔离，程序仍应放在可信目录。
 - Cloudflare credentials JSON 等同 tunnel 密钥。
 - 不要把上述文件上传、提交或发送给他人。
 - 不要在两台电脑上同时运行同一个 Named Tunnel credentials。

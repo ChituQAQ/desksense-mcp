@@ -122,6 +122,7 @@ Local server:
 Task Scheduler (AtLogOn, current interactive user)
   -> wscript.exe
   -> scripts\run-desksense-hidden.vbs
+  -> powershell.exe -File scripts\start.ps1 -Wait
   -> .venv\Scripts\python.exe -m desksense.server
 ```
 
@@ -157,6 +158,7 @@ For a custom port, `status.ps1` reads `config.json`.
 ## Security
 
 - `.secrets\API_KEY.txt` is a password.
+- Before creating a token, the installer restricts Windows ACLs on `.secrets` and `data` to the current user, SYSTEM, and local Administrators. Reparse points are rejected. Existing source installs can run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\protect-private-data.ps1` separately. This does not isolate the app from administrators or malicious users who can modify its program directory; use a trusted installation directory.
 - A Cloudflare credentials JSON file is a tunnel key.
 - Never upload, commit, or share either file.
 - Never run the same Named Tunnel credentials on two PCs at once.

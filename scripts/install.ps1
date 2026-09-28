@@ -236,7 +236,9 @@ try {
         }
     }
 
-    New-Item -ItemType Directory -Force -Path $SecretsDir, $DataDir, $LogsDir | Out-Null
+    # Secure directories before bootstrap creates or reads credentials/database files.
+    & (Join-Path $PSScriptRoot 'protect-private-data.ps1') -Root $Root
+    New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
     $BootstrapArgs = @('-m', 'desksense.bootstrap', '--root', $Root, '--port', [string]$Port)
     foreach ($Origin in $AllowedOrigins) {
         $BootstrapArgs += @('--allowed-origin', $Origin)
@@ -367,15 +369,15 @@ ingress:
         $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserId
         $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
-            -MultipleInstances IgnoreNew
+            -MultipleInstances IgnoreNew -StartWhenAvailable `
+            -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         $Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive `
             -RunLevel Limited
 
         function Register-InteractiveTask {
             param([string]$Name, [object]$Action, [string]$Description)
-            Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
             Register-ScheduledTask -TaskName $Name -Action $Action -Trigger $Trigger `
-                -Settings $Settings -Principal $Principal -Description $Description | Out-Null
+                -Settings $Settings -Principal $Principal -Description $Description -Force | Out-Null
         }
 
         $Wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
@@ -403,9 +405,8 @@ ingress:
                 'Cloudflared Named Tunnel user-login autostart'
         }
 
-        if (@(Get-PortListener).Count -eq 0) {
-            Start-ScheduledTask -TaskName $TaskMcp
-        }
+        # The launcher validates identity/health and monitors an existing server too.
+        Start-ScheduledTask -TaskName $TaskMcp
     }
 
     if ($NamedMode) {

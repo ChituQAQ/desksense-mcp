@@ -10,6 +10,9 @@ INSTALLER = ROOT / "scripts" / "install.ps1"
 
 
 def _run_validation_only(*arguments: str) -> subprocess.CompletedProcess[str]:
+    # PowerShell 5.1 writes localized console errors in the ANSI codepage
+    # (GBK on zh-CN); tolerate non-UTF-8 bytes so the ASCII assertions hold
+    # regardless of the pytest process's default encoding.
     return subprocess.run(
         [
             "powershell.exe",
@@ -22,6 +25,8 @@ def _run_validation_only(*arguments: str) -> subprocess.CompletedProcess[str]:
         ],
         cwd=ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )
