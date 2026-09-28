@@ -10,7 +10,7 @@
 
 - Windows 10 或更新版本
 - Python 3.11、3.12、3.13 或 3.14
-- `DeskSense-v1.0.1.zip` 解压到稳定目录
+- `DeskSense-v1.0.2.zip` 解压到稳定目录
 
 在解压目录打开 PowerShell。下面所有命令都使用 `-ExecutionPolicy Bypass`，只绕过当前进程的脚本限制，不修改系统执行策略。
 

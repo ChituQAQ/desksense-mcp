@@ -10,7 +10,7 @@ Every mode requires:
 
 - Windows 10 or newer
 - Python 3.11, 3.12, 3.13, or 3.14
-- `DeskSense-v1.0.1.zip` extracted to a stable directory
+- `DeskSense-v1.0.2.zip` extracted to a stable directory
 
 Open PowerShell in the extracted directory. The commands use `-ExecutionPolicy Bypass` only for the current process; they do not change the system execution policy.
 

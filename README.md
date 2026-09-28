@@ -38,7 +38,7 @@ SullyOS 是经过测试的客户端示例，不是必需或专用客户端。
 普通用户无需 Git、pip 知识，也无需手工创建 venv、配置、token 或计划任务。
 
 1. 打开 [GitHub Releases](https://github.com/ChituQAQ/desksense-mcp/releases)。
-2. 下载 `DeskSense-v1.0.1.zip`。
+2. 下载 `DeskSense-v1.0.2.zip`。
 3. 解压到不会被移动或删除的稳定目录，例如 `D:\Apps\DeskSense`。
 4. 在解压目录打开 PowerShell，运行下面的一条命令。
 

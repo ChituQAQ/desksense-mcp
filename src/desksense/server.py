@@ -37,7 +37,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 SERVICE_NAME = "DeskSense MCP"
-SERVICE_VERSION = "1.0.1"
+SERVICE_VERSION = "1.0.2"
 
 logger = logging.getLogger("desksense")
 

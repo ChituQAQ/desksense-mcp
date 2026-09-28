@@ -38,7 +38,7 @@ SullyOS is one tested example client; it is neither required nor exclusive.
 Regular users do not need Git, pip knowledge, or manual venv, config, token, or Task Scheduler setup.
 
 1. Open [GitHub Releases](https://github.com/ChituQAQ/desksense-mcp/releases).
-2. Download `DeskSense-v1.0.1.zip`.
+2. Download `DeskSense-v1.0.2.zip`.
 3. Extract it to a stable directory that will not be moved or deleted, such as `D:\Apps\DeskSense`.
 4. Open PowerShell in the extracted directory and run one command.
 
