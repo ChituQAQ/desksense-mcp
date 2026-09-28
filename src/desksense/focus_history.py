@@ -157,15 +157,21 @@ class FocusHistory:
                 pass
 
     def query(self, minutes: int = 30, limit: int = 100) -> List[Dict[str, Any]]:
-        """按时间升序返回最近焦点变化（分钟窗口内）。"""
+        """按时间升序返回与时间窗口有交集的焦点事件。
+
+        除窗口内开始的事件外，还包括开始早于窗口但仍在持续（ended_at
+        为空）或在窗口内才结束的事件，否则持续中的当前应用会从
+        “最近 N 分钟”里消失。
+        """
         with self._lock:
             self._ensure_connection()
             cutoff = (datetime.now() - timedelta(minutes=minutes)).isoformat()
             cur = self._db.execute(
                 "SELECT started_at, ended_at, process_name, pid, window_title "
-                "FROM focus_events WHERE started_at >= ? "
+                "FROM focus_events "
+                "WHERE started_at >= ? OR ended_at IS NULL OR ended_at >= ? "
                 "ORDER BY id DESC LIMIT ?",
-                (cutoff, limit),
+                (cutoff, cutoff, limit),
             )
             rows = cur.fetchall()
         # 倒序读回 → 需按时间升序返回
@@ -199,6 +205,18 @@ class FocusHistory:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self.close_open_event()
+
+    def close(self) -> None:
+        """停止 monitor、结束未闭合事件并释放数据库连接（幂等）。"""
+        self.stop_monitor()
+        with self._lock:
+            if self._db is None:
+                return
+            try:
+                self._db.close()
+            except Exception:
+                pass
+            self._db = None
 
     def _monitor_loop(self, poll_interval: float) -> None:
         # 将窗口读取放到循环外 import，避免循环依赖

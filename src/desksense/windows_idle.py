@@ -19,6 +19,9 @@ class LASTINPUTINFO(ctypes.Structure):
 
 _USER32 = ctypes.windll.user32
 _KERNEL32 = ctypes.windll.kernel32
+# 默认 restype 是有符号 c_int，连续开机约 24.9 天后 tick 会变负，
+# 与 DWORD 型 dwTime 相减得到极端负值。显式声明为无符号。
+_KERNEL32.GetTickCount.restype = wintypes.DWORD
 
 
 def get_idle_seconds() -> Optional[int]:
@@ -28,10 +31,11 @@ def get_idle_seconds() -> Optional[int]:
         info.cbSize = ctypes.sizeof(LASTINPUTINFO)
         if not _USER32.GetLastInputInfo(ctypes.byref(info)):
             return None
-        tick_count = _KERNEL32.GetTickCount()
-        diff = int(tick_count) - int(info.dwTime)
-        if diff < 0:
-            # 时钟回绕不常见，直接视为 0
+        tick_count = int(_KERNEL32.GetTickCount())
+        # 32 位无符号差值：tick 与 dwTime 各自回绕后相减依然正确。
+        diff = (tick_count - int(info.dwTime)) & 0xFFFFFFFF
+        if diff >= 0x80000000:
+            # 输入恰好落在两次读取之间时差值回绕成接近 2^32，按 0 处理。
             diff = 0
         return diff // 1000
     except Exception:

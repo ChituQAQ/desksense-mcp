@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
@@ -186,15 +187,37 @@ def build_app(cfg: Optional[Config] = None):
         transport_security=_ts,
     )
 
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
     from starlette.middleware.cors import CORSMiddleware
+    from starlette.routing import Mount
 
-    app = CORSMiddleware(
-        BearerAuthMiddleware(mcp_app, cfg),
-        allow_origins=configured_origins,
-        allow_origin_regex=LOCAL_CORS_ORIGIN_REGEX,
-        allow_methods=["*"],
-        allow_headers=ALLOW_HEADERS,
-        expose_headers=EXPOSE_HEADERS,
+    # SDK 返回的 Starlette app 自带 lifespan（管理 MCP 会话资源）；
+    # 外层再包一层 Starlette：保留内层 lifespan，并在 ASGI 关闭后
+    # 停止焦点监控线程、释放 SQLite 连接。
+    inner_lifespan = mcp_app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def _lifespan(app):
+        async with inner_lifespan(mcp_app):
+            yield
+        history.stop_monitor()
+        history.close()
+
+    app = Starlette(
+        routes=[Mount("/", app=mcp_app)],
+        middleware=[
+            Middleware(BearerAuthMiddleware, cfg),
+            Middleware(
+                CORSMiddleware,
+                allow_origins=configured_origins,
+                allow_origin_regex=LOCAL_CORS_ORIGIN_REGEX,
+                allow_methods=["*"],
+                allow_headers=ALLOW_HEADERS,
+                expose_headers=EXPOSE_HEADERS,
+            ),
+        ],
+        lifespan=_lifespan,
     )
     return app, history, cfg
 

@@ -85,27 +85,31 @@ def get_top_processes(sort_by: str = "memory", limit: int = 10) -> List[Dict[str
     sort_by = "memory" if sort_by == "memory" else "cpu"
 
     processes = []
+    # 保留 process_iter 给出的同一批 Process 实例：cpu_percent 的基线
+    # 存在实例内部，重建实例会让两次采样失去关联，结果恒为 0。
+    proc_map = {}
     try:
         for proc in psutil.process_iter(["name", "pid"]):
             try:
-                pinfo = proc.info
-                processes.append(pinfo)
+                pid = proc.info.get("pid")
+                if pid:
+                    proc_map[pid] = proc
+                processes.append(proc.info)
             except Exception:
                 continue
     except Exception:
         processes = []
 
-    # cpu 采样：先对所有进程做一次 cpu_percent(interval=None) 以重置计数器
+    # cpu 采样：同一实例先取基线，短暂等待后取差值
     try:
         psutil.cpu_percent(interval=None)
-        for proc in processes:
+        for proc in proc_map.values():
             try:
-                p = psutil.Process(proc.get("pid"))
-                p.cpu_percent(interval=None)
+                proc.cpu_percent(interval=None)
             except Exception:
                 pass
         # 短采样（仅当 limit>0）
-        if processes:
+        if proc_map:
             time.sleep(0.2)
     except Exception:
         pass
@@ -117,7 +121,9 @@ def get_top_processes(sort_by: str = "memory", limit: int = 10) -> List[Dict[str
         if not pid:
             continue
         try:
-            p = psutil.Process(pid)
+            p = proc_map.get(pid)
+            if p is None:
+                continue
             mem_info = p.memory_info()
             mem_bytes = getattr(mem_info, "rss", 0) or 0
             mem_percent = 0.0

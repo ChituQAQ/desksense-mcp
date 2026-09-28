@@ -3,6 +3,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from desksense.focus_history import FocusHistory
@@ -59,3 +61,54 @@ def test_cleanup_old(tmp_path, monkeypatch):
     events = h.query(minutes=30, limit=100)
     assert len(events) == 0
     h.close_open_event()
+
+
+def test_query_includes_events_active_during_window(tmp_path):
+    from datetime import datetime, timedelta
+
+    db = tmp_path / "window.db"
+    h = FocusHistory(db, retention_days=30)
+    now = datetime.now()
+
+    def insert(name, started_minutes_ago, ended_minutes_ago):
+        started = (now - timedelta(minutes=started_minutes_ago)).isoformat()
+        ended = (
+            None
+            if ended_minutes_ago is None
+            else (now - timedelta(minutes=ended_minutes_ago)).isoformat()
+        )
+        h._db.execute(
+            "INSERT INTO focus_events (started_at, ended_at, process_name, pid, window_title) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (started, ended, name, 0, ""),
+        )
+
+    insert("still-open", 60, None)      # 开始早于窗口但仍在持续（审计缺陷场景）
+    insert("ended-inside", 60, 10)      # 与最近 30 分钟存在交集
+    insert("ended-before", 60, 50)      # 与最近 30 分钟无交集
+    h._db.commit()
+
+    names = [e["process_name"] for e in h.query(minutes=30, limit=100)]
+    assert "still-open" in names
+    assert "ended-inside" in names
+    assert "ended-before" not in names
+    h.close_open_event()
+
+
+def test_close_releases_connection_and_stops_monitor(tmp_path, monkeypatch):
+    import os
+
+    if os.name != "nt":
+        pytest.skip("monitor 依赖 windows_focus")
+
+    monkeypatch.setattr(
+        "desksense.windows_focus.get_foreground_info",
+        lambda: {"pid": None, "process_name": None, "window_title": None},
+    )
+    db = tmp_path / "close.db"
+    h = FocusHistory(db, retention_days=30)
+    h.start_monitor(0.05)
+    h.close()
+    assert h._db is None
+    assert h._thread is None or not h._thread.is_alive()
+    h.close()  # 幂等

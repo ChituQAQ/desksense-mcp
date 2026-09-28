@@ -208,7 +208,8 @@ def _resolve_uwp_from_children(hwnd: int) -> Dict[str, Any]:
     result: Dict[str, Any] = {"pid": None, "title": ""}
     try:
 
-        def cb(child: int) -> bool:
+        # WNDENUMPROC 契约：回调收到 (hwnd, lparam) 两个参数。
+        def cb(child: int, lparam: int) -> bool:
             child = int(child)
             # 只关心可见子窗口
             if not IsWindowVisible(wintypes.HWND(child)):

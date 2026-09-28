@@ -86,3 +86,17 @@
 - 2026-09-28 19:50：接手核对发现测试已部分补齐，实现尚未同步；启动专项回归实际为 15 通过、4 失败（两种时机的日志保留、服务存在/重试等待两种停止场景）。沿用上述授权继续修复，不重做已完成的部署切换。
 - 2026-09-28 20:28：三项 P2 修复已完成并验证（接手会话核对工作区后确认实现已同步）：`stop.ps1` 重写为先结束本安装目录的专用启动器（仅匹配 `-File <本目录>\start.ps1` 的宿主，排除 `-Command` 宿主与其他节点路径），再按本目录 venv 命令行停止服务并逐个复核 PID 归属，启动器停止失败即中止、不杀服务，重试等待期由启动器进程匹配覆盖；`start.ps1` 在每次启动尝试前把 stdout/stderr 轮转为 `.previous`，重试不再截断最近一次故障输出；启动回归测试统一加 OS/HTTP mock 守卫，未 mock 的系统调用立即以退出码 97 失败，不再依赖宿主是否有真实服务。pytest 54/54 通过；PowerShell 5.1 语法 13 脚本、Python 22 文件编译、`pip check`、`git diff --check` 通过。
 - 2026-09-28 20:28：实机只读复核（未停止任何进程、未改任务/配置/ACL/隧道）：计划任务 Running 且为新启动链（wscript -> vbs -> powershell -File start.ps1 -Wait），RestartCount 3 / 间隔 1 分钟；127.0.0.1:18765 监听进程为 venv 转发器与解释器子进程（一对父子，此前疑似"双服务进程"系 Windows venv 正常结构，非僵尸）；`/healthz` 返回 200 且服务标识正确，未认证 `/mcp` 返回 401；`stop.ps1` 的启动器/服务识别模式与真实运行命令行逐条匹配（仅正则比对，未执行停止）；cloudflared 连接器在运行，DeskSense ingress 指向 18765，另一条业务路由指向未变，8765 仍由原业务进程占用。真实下次登录触发仍未验证（约束不注销）；UWP 回调、CPU 采样、闲置计时、焦点历史生命周期等感知类缺陷维持遗留记录，不在本轮范围。
+
+## 2026-09-28：感知类缺陷修复（提交 f089e32 之后）
+
+用户询问遗留两项的执行方式；登录自启验证需真实登录事件（不由代理执行重启/注销），感知缺陷经确认后按推荐范围执行：UWP 回调、CPU 采样、闲置计时、焦点历史生命周期与近期查询四类，迁移脚本（export-move/install-move）继续单独留待后续并需先定契约。
+
+- 先写失败测试坐实缺陷：新增 `tests/test_windows_focus.py`、`tests/test_system_info.py`，扩展 `test_idle.py`、`test_focus_history.py`、`test_server_contract.py`，共 7 项新测试在未修复代码上全部失败（UWP 用例原样复现生产 stderr 中的 `TypeError: cb() takes 1 positional argument but 2 were given`）。
+- 修复 `src/desksense/windows_focus.py`：`_resolve_uwp_from_children` 的枚举回调按 WNDENUMPROC 契约补上 `(hwnd, lparam)` 两参数。
+- 修复 `src/desksense/system_info.py`：`get_top_processes` 保留 `process_iter` 给出的同一批 `psutil.Process` 实例完成两次采样，不再重建实例导致基线丢失、CPU 恒为 0。
+- 修复 `src/desksense/windows_idle.py`：`GetTickCount.restype` 显式声明为 `DWORD`，差值按 32 位无符号回绕计算；输入落在两次读取之间的回绕竞争按 0 处理。
+- 修复 `src/desksense/focus_history.py`：新增幂等 `close()`（停线程、结束未闭合事件、释放连接）；`query` 改为返回与时间窗口有交集的事件——除窗口内开始的事件外，还包括开始早于窗口但仍在持续或在窗口内才结束的事件（比审计发现的最小修复略宽：与窗口交叠但已结束的事件同样纳入，否则时间线缺少切换前上下文）。
+- 修复 `src/desksense/server.py`：外层改为 Starlette 应用（`Mount("/")` 挂载 SDK app，CORS 与 Bearer 中间件层级不变），组合内层 SDK lifespan，ASGI 关闭后停监控线程并释放数据库连接；已用探针验证 `Mount("/")` 下 `/mcp`、`/healthz` 路径与 lifespan 顺序（内层先关、外层后清）。
+- 回归：pytest 63/63（新增 9 项）；Python 25 文件编译、`pip check`、`git diff --check` 通过。
+- 部署生效：强杀服务进程树（venv 转发器 + 解释器）后，`start.ps1` 监督器记录 `Server exited with code 1` 并在 62 秒后用新代码自动拉起（新解释器 PID，任务实例存活），`/healthz` 200、未认证 `/mcp` 401——自动恢复机制第二次实测通过。stderr 中的 UWP TypeError 预计不再新增（该错误仅在前台为 UWP 应用时触发，需随时间观察）。
+- 仍未验证：真实下次登录自启触发（待用户重启/登录后核对任务历史与健康检查）；迁移脚本契约未定。
