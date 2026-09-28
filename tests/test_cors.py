@@ -75,5 +75,24 @@ async def test_configured_https_origin_is_exactly_allowed(app_factory):
     assert denied.headers.get("access-control-allow-origin") is None
 
 
+@pytest.mark.asyncio
+async def test_unauthorized_mcp_keeps_cors_headers_for_allowed_origins(app_factory):
+    # 契约（scripts/verify-install.py）：未授权 401 也必须带 CORS 头，
+    # 否则浏览器端 JS 读不到 401 状态，无法得知"是没带 token"。
+    # 回归背景：中间件顺序曾把 Bearer 放到 CORS 外层，401 短路丢头（冷环境 CI 抓到）。
+    for origin in ("https://client.example.com", "http://localhost:43110"):
+        transport = httpx2.ASGITransport(app=app_factory(["https://client.example.com"]))
+        async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/mcp",
+                headers={"Origin": origin, "Content-Type": "application/json"},
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+        assert response.status_code == 401
+        assert response.headers["access-control-allow-origin"] == origin
+        exposed = response.headers.get("access-control-expose-headers", "").lower()
+        assert "mcp-session-id" in exposed
+
+
 def test_mcp_session_id_is_exposed():
     assert [header.lower() for header in EXPOSE_HEADERS] == ["mcp-session-id"]

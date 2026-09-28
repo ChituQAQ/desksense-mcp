@@ -113,3 +113,11 @@
 - 新增 `tests/test_move_scripts.py` 11 项契约测试（临时目录 + 假凭据，不触碰真实 `~/.cloudflared`，不输出凭据内容）：导出仅含被引用凭据与本地路由、三类导出拒绝；恢复的全新写入、TunnelID 校验、异隧道拒绝（含 -MergeIngress）、同隧道需显式合并、合并在 catch-all 前插入且幂等、旧档案回退、脚本间文本契约。测试过程暴露并修复了上述 `.secrets` 缺失崩溃与 git 退出码泄漏两个既有问题。
 - 回归：pytest 74/74（新增 11 项）；PowerShell 5.1 语法 15 脚本、Python 28 文件编译、`pip check`、`git diff --check` 通过。
 - 本轮未运行真实迁移（无第二台测试机）；恢复逻辑已按上述用例隔离验证。遗留：真实下次登录自启触发验证（待重启）；v1.0.2 发布与版本号提升；推送后跑冷环境 CI。
+
+## 2026-09-28：推送与冷环境 CI
+
+- 本地三个未推送提交与远端两个 README 网页编辑提交（C:\Apps→D:\Apps 示例路径，与本地改动无重叠）变基合并后推送（原哈希 f089e32/e336aa2/8d1159c → 04d284d/7ff5ff4/3468558），变基后 74/74 通过。
+- 冷环境 CI 结果：四个 Python 矩阵（3.11–3.14）全绿；"PowerShell and clean-room ZIP" 失败于 `verify-install.py` 的断言 `unauthorized.headers["access-control-allow-origin"] == origin`。
+- 根因是 server.py 生命周期重构引入的真实回归：Starlette `middleware=[...]` 列表第一项才是最外层，重构时误把 BearerAuthMiddleware 放在 CORSMiddleware 外层，未授权 401 在 CORS 之前短路，丢失 allow-origin/expose-headers 头（浏览器端 JS 将读不到 401）。本地 pytest 未抓到：test_cors.py 只断言了 OPTIONS 预检，未覆盖"未授权请求仍带 CORS 头"这一 verify-install.py 契约。
+- 修复：调整中间件顺序（CORS 在外层包住 Bearer 守卫）；在 test_cors.py 新增回归测试 `test_unauthorized_mcp_keeps_cors_headers_for_allowed_origins`（先红后绿，覆盖配置 origin 与 localhost 正则 origin，断言 401 + allow-origin + expose-headers）。pytest 75/75。
+- 教训记录：server.py 的 HTTP 层改动应同时对照 `scripts/verify-install.py` 的端到端契约；冷环境 CI 的洁净房安装验证是本地回归无法替代的一环。

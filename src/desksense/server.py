@@ -207,7 +207,8 @@ def build_app(cfg: Optional[Config] = None):
     app = Starlette(
         routes=[Mount("/", app=mcp_app)],
         middleware=[
-            Middleware(BearerAuthMiddleware, cfg),
+            # 列表第一项在最外层：CORS 必须包住 Bearer 守卫，
+            # 未授权 401 响应也要带上 allow-origin/expose-headers 头。
             Middleware(
                 CORSMiddleware,
                 allow_origins=configured_origins,
@@ -216,6 +217,7 @@ def build_app(cfg: Optional[Config] = None):
                 allow_headers=ALLOW_HEADERS,
                 expose_headers=EXPOSE_HEADERS,
             ),
+            Middleware(BearerAuthMiddleware, cfg),
         ],
         lifespan=_lifespan,
     )
