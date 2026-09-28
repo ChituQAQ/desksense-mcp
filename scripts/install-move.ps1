@@ -2,6 +2,9 @@
 # 用法: 解压 desksense-move-<ts>.zip 后，在解压出的项目根目录运行:
 #        .\scripts\install-move.ps1
 # 本脚本推导项目根目录、动态发现环境，不硬编码项目路径或用户目录。
+# -MergeIngress：仅当目标机已存在同一 tunnel 的 config.yml 时，非破坏性追加缺失路由。
+[CmdletBinding()]
+param([switch]$MergeIngress)
 $ErrorActionPreference = 'Stop'
 
 # ---- 1. 推导解压目录与项目根目录（archive root -> project -> scripts） ----
@@ -10,7 +13,14 @@ $ExtractionRoot = Split-Path -Parent $ProjectRoot
 $HomeDir = $env:USERPROFILE
 if (-not $HomeDir) { $HomeDir = Join-Path $env:HOMEDRIVE $env:HOMEPATH }
 $CfdHome = Join-Path $HomeDir '.cloudflared'
-$LocalOrigin = 'http://127.0.0.1:8765'
+# 本地端口随迁移来的 config.json 走（与旧机一致），不再硬编码。
+$LocalPort = 8765
+$NodeCfgPath = Join-Path $ProjectRoot 'config.json'
+if (Test-Path -LiteralPath $NodeCfgPath -PathType Leaf) {
+    $NodeCfg = Get-Content -Raw -LiteralPath $NodeCfgPath | ConvertFrom-Json
+    if ($NodeCfg.port) { $LocalPort = [int]$NodeCfg.port }
+}
+$LocalOrigin = "http://127.0.0.1:$LocalPort"
 
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host "DeskSense MOVE — install"
@@ -71,16 +81,12 @@ if (Test-Path $ApiKeySrc) {
     Write-Host ""
 }
 
-# ---- 5. 恢复 Tunnel credentials 到 ~/.cloudflared ----
+# ---- 5. 校验迁移包结构（凭据与 config.yml 在步骤 7 统一恢复） ----
+$ManifestPath = Join-Path $ExtractionRoot 'manifest.json'
 $CfdArchive = Join-Path $ExtractionRoot 'cloudflared'
-if (Test-Path $CfdArchive) {
-    New-Item -ItemType Directory -Force -Path $CfdHome | Out-Null
-    Get-ChildItem -Path $CfdArchive -File | ForEach-Object {
-        Copy-Item -Path $_.FullName -Destination $CfdHome -Force
-        Write-Host "Restored cloudflared file: $($_.Name)"
-    }
-} else {
-    Write-Host "WARNING: no 'cloudflared' folder in archive. Tunnel credentials not restored." -ForegroundColor Yellow
+if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+    Write-Host "ERROR: manifest.json not found in archive root: $ExtractionRoot" -ForegroundColor Red
+    exit 1
 }
 
 # ---- 6. 动态发现 cloudflared.exe ----
@@ -102,39 +108,19 @@ if (-not $Cf) {
 }
 Write-Host "cloudflared: $Cf"
 
-# ---- 7. 生成/恢复正确的 config.yml ----
-# 若导出的 config.yml 已存在且含 machine-specific 路径，重写为动态路径。
-$CfgPath = Join-Path $CfdHome 'config.yml'
-$CfdCredJson = $null
-# 从导出/现有的 config.yml 中读取 hostname 与 tunnel，而不是硬编码
+# ---- 7. 恢复 tunnel 凭据与 config.yml（按 manifest 隧道 ID 精确匹配；冲突默认拒绝） ----
+# 契约细节见 restore-tunnel-config.ps1 头部注释。
+$RestoreScript = Join-Path $ProjectRoot 'scripts\restore-tunnel-config.ps1'
+if (-not (Test-Path -LiteralPath $RestoreScript -PathType Leaf)) {
+    Write-Host "ERROR: $RestoreScript not found." -ForegroundColor Red
+    exit 1
+}
+& $RestoreScript -ManifestFile $ManifestPath -ArchiveCfdDir $CfdArchive -CfdHome $CfdHome -MergeIngress:$MergeIngress
+$Manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
 $CfgHostname = ''
-$CfgTunnel = ''
-$ArchivedCfg = Join-Path $CfdArchive 'config.yml'
-$CfgToRead = $ArchivedCfg
-if (-not (Test-Path $CfgToRead)) { $CfgToRead = $CfgPath }
-if (Test-Path $CfgToRead) {
-    $oldCfgRaw = Get-Content -Raw -Path $CfgToRead
-    if ($oldCfgRaw -match '(?m)^\s*-\s+hostname:\s*(\S+)') { $CfgHostname = $Matches[1] }
-    if ($oldCfgRaw -match '(?m)^\s*tunnel:\s*(\S+)') { $CfgTunnel = $Matches[1] }
-}
-Get-ChildItem -Path $CfdHome -File -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_.Name -ne 'cert.pem') { $CfdCredJson = $_.FullName }
-}
-if ($CfdCredJson) {
-    $CfgContent = @"
-tunnel: $CfgTunnel
-credentials-file: $CfdCredJson
-protocol: http2
-
-ingress:
-  - hostname: $CfgHostname
-    service: $LocalOrigin
-  - service: http_status:404
-"@
-    Set-Content -Path $CfgPath -Value $CfgContent -Encoding UTF8
-    Write-Host "Wrote config.yml -> $CfgPath"
-} else {
-    Write-Host "WARNING: no tunnel credentials JSON found in ~/.cloudflared. config.yml not rewritten." -ForegroundColor Yellow
+if ($Manifest.routes) {
+    $FirstRoute = @($Manifest.routes)[0]
+    if ($FirstRoute.hostname) { $CfgHostname = [string]$FirstRoute.hostname }
 }
 
 # ---- 8. 打印旧机器关闭确认，要求输入 YES ----
@@ -152,49 +138,33 @@ if ($confirmed -ne 'YES') {
     exit 0
 }
 
-# ---- 9. 注册两个自启动任务 (交互用户 session) ----
-function Register-Task {
-    param([string]$TaskName, [System.Management.Automation.PSObject]$Action, [string]$Desc)
-    try {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    } catch { }
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $trigger -Settings $settings -Principal $principal -Description $Desc | Out-Null
-    Write-Host "Registered autostart task: $TaskName" -ForegroundColor Green
+# ---- 9. 注册自启动任务（复用项目脚本，与全新安装共用同一加固链路） ----
+$InstallAutostart = Join-Path $ProjectRoot 'scripts\install-autostart.ps1'
+if (-not (Test-Path -LiteralPath $InstallAutostart -PathType Leaf)) {
+    Write-Host "ERROR: $InstallAutostart not found." -ForegroundColor Red
+    exit 1
 }
-
-# DeskSense MCP
-$Python = Join-Path $Venv 'Scripts\python.exe'
-$actionMcp = New-ScheduledTaskAction -Execute $Python -Argument '-m desksense.server' -WorkingDirectory $ProjectRoot
-Register-Task -TaskName 'DeskSense MCP' -Action $actionMcp -Desc 'DeskSense MCP user-login autostart'
-
-# Cloudflared Named Tunnel (复用导出的 start-named-tunnel.ps1)
-$TunnelScript = Join-Path $ProjectRoot 'scripts\start-named-tunnel.ps1'
-if (Test-Path $TunnelScript) {
-    $actionTunnel = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$TunnelScript`"" `
-        -WorkingDirectory $ProjectRoot
-    Register-Task -TaskName 'Cloudflared Named Tunnel' -Action $actionTunnel -Desc 'Cloudflared Named Tunnel user-login autostart'
+& $InstallAutostart
+$TunnelAutostart = Join-Path $ProjectRoot 'scripts\install-tunnel-autostart.ps1'
+if (Test-Path -LiteralPath $TunnelAutostart -PathType Leaf) {
+    & $TunnelAutostart
 } else {
-    Write-Host "WARNING: scripts\start-named-tunnel.ps1 not found; tunnel autostart not registered." -ForegroundColor Yellow
+    Write-Host "WARNING: scripts\install-tunnel-autostart.ps1 not found; tunnel autostart not registered." -ForegroundColor Yellow
 }
 
-# ---- 10. 启动 DeskSense MCP server ----
+# ---- 10. 启动 DeskSense MCP server（复用带身份/健康校验的启动器） ----
 Write-Host ""
 Write-Host "Starting DeskSense MCP server ..."
-$Logs = Join-Path $ProjectRoot 'logs'
-New-Item -ItemType Directory -Force -Path $Logs | Out-Null
-Start-Process -FilePath $Python -ArgumentList @('-m','desksense.server') `
-    -WorkingDirectory $ProjectRoot -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $Logs 'stdout.log') `
-    -RedirectStandardError (Join-Path $Logs 'stderr.log')
-Start-Sleep -Seconds 3
+& (Join-Path $ProjectRoot 'scripts\start.ps1')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: start.ps1 failed; see logs\startup.log." -ForegroundColor Red
+    exit 1
+}
 Write-Host "Server started at $LocalOrigin"
 
 # ---- 11. 启动 Named Tunnel ----
-if (Test-Path $TunnelScript) {
+$TunnelScript = Join-Path $ProjectRoot 'scripts\start-named-tunnel.ps1'
+if (Test-Path -LiteralPath $TunnelScript) {
     Write-Host "Starting Cloudflared Named Tunnel ..."
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TunnelScript
 } else {
@@ -203,5 +173,5 @@ if (Test-Path $TunnelScript) {
 
 Write-Host ""
 Write-Host "DeskSense MOVE install complete." -ForegroundColor Green
-Write-Host "Local health : http://127.0.0.1:8765/healthz"
+Write-Host "Local health : $LocalOrigin/healthz"
 if ($CfgHostname) { Write-Host "Public MCP   : https://$CfgHostname/mcp" }

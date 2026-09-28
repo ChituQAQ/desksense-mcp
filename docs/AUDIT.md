@@ -100,3 +100,16 @@
 - 回归：pytest 63/63（新增 9 项）；Python 25 文件编译、`pip check`、`git diff --check` 通过。
 - 部署生效：强杀服务进程树（venv 转发器 + 解释器）后，`start.ps1` 监督器记录 `Server exited with code 1` 并在 62 秒后用新代码自动拉起（新解释器 PID，任务实例存活），`/healthz` 200、未认证 `/mcp` 401——自动恢复机制第二次实测通过。stderr 中的 UWP TypeError 预计不再新增（该错误仅在前台为 UWP 应用时触发，需随时间观察）。
 - 仍未验证：真实下次登录自启触发（待用户重启/登录后核对任务历史与健康检查）；迁移脚本契约未定。
+
+## 2026-09-28：迁移脚本契约重做（提交 e336aa2 之后）
+
+用户确认两项契约决策：export 只导当前凭据；install 遇冲突默认拒绝、显式参数才非破坏性合并。迁移脚本是审计清单中最后一个遗留代码缺陷。
+
+- 新增 `scripts/restore-tunnel-config.ps1`：凭据/配置恢复的独立可测单元。按 manifest 的 tunnel_id 精确匹配唯一凭据 JSON 并校验文件内 TunnelID；目标无 config.yml 时按 manifest 路由 + 404 兜底全新写入；目标 config.yml 属于**不同 tunnel** 时拒绝（一个 config.yml 只服务一条 tunnel，加 -MergeIngress 也拒绝）；属于**同一 tunnel** 时默认拒绝、`-MergeIngress` 才在 catch-all 之前追加缺失路由，已有行逐字节不动（缩进沿用目标文件现有列表项）；全部校验通过后才产生任何写操作；旧格式档案（manifest 无 routes）回退读档案内 config.yml 的第一条路由并告警。
+- 重写 `scripts/export-move.ps1` 的 tunnel 部分：只导出 config.yml 引用的那一个凭据（校验 TunnelID 一致）+ 按 config.json 端口筛选的本节点 ingress 路由片段，写入 manifest（tunnel_id/credentials_file/routes）；不再打包 `~/.cloudflared` 下其他凭据 JSON，不再随包外发完整共享 config.yml；无 config.yml、无本地端口路由、凭据不匹配时拒绝导出。顺带修复既有 bug：源节点缺 `.secrets` 目录时 else 分支写未创建的目录导致导出崩溃；结尾补显式 `exit 0`，避免 git 原生命令退出码（如非仓库目录的 128）泄漏为本脚本退出码。
+- 重做 `scripts/install-move.ps1`：凭据与配置恢复改调 restore-tunnel-config.ps1（新增 `-MergeIngress` 透传）；本地端口从迁移来的 config.json 读取，不再硬编码 8765；任务注册改为复用项目的 `install-autostart.ps1` 与 `install-tunnel-autostart.ps1`（与全新安装同一加固链路，含身份校验启动器与失败重试），服务启动改调 `start.ps1` 并检查退出码；删除了重复的旧式任务注册（Unregister + 无重试）与"取最后一个 JSON + 无条件重写 config"逻辑。
+- 现代化 `scripts/install-tunnel-autostart.ps1`：与 install-autostart.ps1 同款（-Force 注册、AtLogOn 指定用户、StartWhenAvailable、RestartCount 3/1 分钟），不再先 Unregister 再重建。
+- 更新 `docs/MIGRATE.md`：记录导出最小敏感集、四类导入行为（全新写入/异隧道拒绝/同隧道拒绝/显式合并）、旧档案回退与端口来源。
+- 新增 `tests/test_move_scripts.py` 11 项契约测试（临时目录 + 假凭据，不触碰真实 `~/.cloudflared`，不输出凭据内容）：导出仅含被引用凭据与本地路由、三类导出拒绝；恢复的全新写入、TunnelID 校验、异隧道拒绝（含 -MergeIngress）、同隧道需显式合并、合并在 catch-all 前插入且幂等、旧档案回退、脚本间文本契约。测试过程暴露并修复了上述 `.secrets` 缺失崩溃与 git 退出码泄漏两个既有问题。
+- 回归：pytest 74/74（新增 11 项）；PowerShell 5.1 语法 15 脚本、Python 28 文件编译、`pip check`、`git diff --check` 通过。
+- 本轮未运行真实迁移（无第二台测试机）；恢复逻辑已按上述用例隔离验证。遗留：真实下次登录自启触发验证（待重启）；v1.0.2 发布与版本号提升；推送后跑冷环境 CI。

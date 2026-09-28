@@ -1,7 +1,9 @@
 ﻿# DeskSense MOVE — 导出迁移包 (在旧电脑上运行)
 # 用法: .\scripts\export-move.ps1
 # 生成: dist\desksense-move-<timestamp>.zip
-# 本脚本只导出迁移真正需要的文件，绝不导出 focus history DB。
+# 本脚本只导出迁移真正需要的文件：config.yml 引用的唯一 tunnel 凭据与
+# 指向本项目端口的 DeskSense 路由片段；绝不导出 focus history DB，
+# 也绝不打包 ~/.cloudflared 下未被引用的其他凭据或其他业务路由。
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -61,8 +63,8 @@ Get-ChildItem -Path (Join-Path $Root 'scripts') -File | Where-Object { $_.Name -
 $SecretsSrc = Join-Path $Root '.secrets'
 $SecretsDst = Join-Path $Stage '.secrets'
 $SensitiveFile = Join-Path $Stage 'SENSITIVE.txt'
+New-Item -ItemType Directory -Force -Path $SecretsDst | Out-Null
 if (Test-Path $SecretsSrc) {
-    New-Item -ItemType Directory -Force -Path $SecretsDst | Out-Null
     Get-ChildItem -Path $SecretsSrc -File | ForEach-Object {
         Copy-Item -Path $_.FullName -Destination $SecretsDst -Force
     }
@@ -71,33 +73,68 @@ if (Test-Path $SecretsSrc) {
     Set-Content -Path $SensitiveFile -Value "WARNING: .secrets/API_KEY.txt was missing on the source machine. You must provide it on the destination." -Encoding UTF8
 }
 
-# ---- 拷贝 Named Tunnel credentials + config.yml ----
+# ---- Named Tunnel：只导出 config.yml 引用的那一个凭据 + DeskSense 本地路由 ----
+# 契约（用户确认 2026-09-28）：绝不打包 ~/.cloudflared 下未被引用的其他凭据 JSON，
+# 也不再复制整个 config.yml（共享隧道的其他业务路由不随包外发）。
 $TunnelStaging = Join-Path $Stage 'cloudflared'
 New-Item -ItemType Directory -Force -Path $TunnelStaging | Out-Null
 
+$ConfigYml = Join-Path $CfdHome 'config.yml'
+if (-not (Test-Path -LiteralPath $ConfigYml -PathType Leaf)) {
+    Write-Host "ERROR: $ConfigYml not found; nothing to export for the Named Tunnel." -ForegroundColor Red
+    exit 1
+}
+$RawCfg = Get-Content -Raw -LiteralPath $ConfigYml
 $TunnelId = ''
-$Hostname = ''
-if (Test-Path $CfdHome) {
-    Get-ChildItem -Path $CfdHome -File | Where-Object { $_.Name -like '*.json' } | ForEach-Object {
-        $dest = Join-Path $TunnelStaging $_.Name
-        Copy-Item -Path $_.FullName -Destination $dest -Force
-        try {
-            $c = Get-Content -Raw -Path $_.FullName | ConvertFrom-Json
-            if ($c.TunnelID) { $TunnelId = $c.TunnelID }
-        } catch { }
-    }
-    if (Test-Path (Join-Path $CfdHome 'config.yml')) {
-        Copy-Item -Path (Join-Path $CfdHome 'config.yml') -Destination $TunnelStaging -Force
-    }
+if ($RawCfg -match '(?m)^\s*tunnel:\s*(\S+)') { $TunnelId = $Matches[1] }
+if (-not $TunnelId) {
+    Write-Host 'ERROR: config.yml has no tunnel: <id> line.' -ForegroundColor Red
+    exit 1
 }
 
-# 从 config.yml 读取 hostname / tunnel id 作为 manifest 补充
-$StackedCfg = Join-Path $TunnelStaging 'config.yml'
-if (Test-Path $StackedCfg) {
-    $raw = Get-Content -Raw -Path $StackedCfg
-    if ($raw -match 'hostname:\s*(\S+)') { $Hostname = $Matches[1] }
-    if (-not $TunnelId -and $raw -match 'tunnel:\s*(\S+)') { $TunnelId = $Matches[1] }
+$CredName = ''
+if ($RawCfg -match '(?m)^\s*credentials-file:\s*(?:"([^"]+)"|(\S+))\s*$') {
+    $CredPath0 = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+    $CredName = [System.IO.Path]::GetFileName($CredPath0)
 }
+if (-not $CredName) { $CredName = "$TunnelId.json" }
+$CredPath = Join-Path $CfdHome $CredName
+if (-not (Test-Path -LiteralPath $CredPath -PathType Leaf)) {
+    Write-Host "ERROR: tunnel credential referenced by config.yml not found: $CredPath" -ForegroundColor Red
+    exit 1
+}
+$Cred = Get-Content -Raw -LiteralPath $CredPath | ConvertFrom-Json
+if ([string]$Cred.TunnelID -ne $TunnelId) {
+    Write-Host 'ERROR: credential TunnelID does not match config.yml tunnel id; refusing to export.' -ForegroundColor Red
+    exit 1
+}
+Copy-Item -LiteralPath $CredPath -Destination (Join-Path $TunnelStaging $CredName) -Force
+
+# 从项目 config.json 读本地端口，挑选 ingress 中指向该端口的“本节点路由”。
+$Port = 8765
+$ProjectCfgPath = Join-Path $Root 'config.json'
+if (Test-Path -LiteralPath $ProjectCfgPath -PathType Leaf) {
+    $NodeCfg = Get-Content -Raw -LiteralPath $ProjectCfgPath | ConvertFrom-Json
+    if ($NodeCfg.port) { $Port = [int]$NodeCfg.port }
+}
+$Routes = @()
+$PendingHostname = ''
+foreach ($Line in (Get-Content -LiteralPath $ConfigYml)) {
+    if ($Line -match '^\s*-\s+hostname:\s*(\S+)') { $PendingHostname = $Matches[1]; continue }
+    if ($PendingHostname -and $Line -match '^\s+service:\s*(\S+)') {
+        $Service = $Matches[1]
+        if ($Service -match '^https?://(?:127\.0\.0\.1|localhost):(\d+)' -and [int]$Matches[1] -eq $Port) {
+            $Routes += [pscustomobject]@{ hostname = $PendingHostname; service = $Service }
+        }
+        $PendingHostname = ''
+    }
+}
+if (-not $Routes) {
+    Write-Host ("ERROR: no ingress route in config.yml points at local port $Port. " +
+                'Fix the ingress entry or the project config.json port before exporting.') -ForegroundColor Red
+    exit 1
+}
+$Hostname = $Routes[0].hostname
 
 # ---- git commit ----
 $GitCommit = ''
@@ -110,21 +147,23 @@ if ($gitExists) {
 
 # ---- manifest.json ----
 $ManifestObj = @{
-    hostname    = $Hostname
-    tunnel_id   = $TunnelId
-    export_time = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK')
-    git_commit  = $GitCommit
+    hostname         = $Hostname
+    tunnel_id        = $TunnelId
+    credentials_file = $CredName
+    routes           = $Routes
+    export_time      = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK')
+    git_commit       = $GitCommit
 }
-$ManifestObj | ConvertTo-Json | Set-Content -Path $Manifest -Encoding UTF8
+$ManifestObj | ConvertTo-Json -Depth 4 | Set-Content -Path $Manifest -Encoding UTF8
 
 # ---- SENSITIVE.txt (若尚未创建) ----
 if (-not (Test-Path $SensitiveFile)) {
     $lines = @(
         '===================================================================='
         'THIS ARCHIVE CONTAINS SENSITIVE MATERIAL:'
-        '  - .secrets/API_KEY.txt       (Bearer token for the MCP endpoint)'
-        '  - cloudflared/*.json         (Named Tunnel credentials, secret key)'
-        '  - cloudflared/config.yml     (Tunnel configuration)'
+        '  - .secrets\API_KEY.txt       (Bearer token for the MCP endpoint)'
+        '  - cloudflared\<tunnel-id>.json (Named Tunnel credentials, secret key)'
+        '  - manifest.json              (tunnel id, routes, machine metadata)'
         'Keep this ZIP private. Do not commit it to git. Do not share it.'
         '===================================================================='
     )
@@ -149,3 +188,5 @@ Write-Host 'Manifest:'
 Get-Content -Raw $Manifest
 Write-Host ''
 Write-Host 'Next: copy this ZIP to the new PC, extract it, then run project\scripts\install-move.ps1.' -ForegroundColor Cyan
+# 显式成功退出：git 等原生命令的失败码不应泄漏为本脚本的退出码。
+exit 0
