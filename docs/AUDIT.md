@@ -128,3 +128,25 @@
 - `package-release.ps1` 打出 dist/DeskSense-v1.0.2.zip（62 个条目）；双重私密路径校验通过（.secrets/config.json/data/logs/.venv/token 均无）。
 - 标签 v1.0.2 推送后 tag 触发的 Windows CI 通过；GitHub Release 已发布（双语说明沿用 v1.0.1 格式，附 DeskSense-v1.0.2.zip）：https://github.com/ChituQAQ/desksense-mcp/releases/tag/v1.0.2
 - 至此本轮审计驱动的修复（启动链、隐私 ACL、18765 端口、感知缺陷、迁移契约、CORS 回归）全部收口为一个已发布版本。遗留仅剩：真实下次登录自启触发验证（待重启）、本机默认端口是否随发布调整（未决，当前发布默认仍为 8765）。
+
+## 2026-09-29：对 2026-09-28 11:00 之后最新代码的复审
+
+范围：按提交记录的 UTC+8，审查 `20a26d6..db32aac`，共 6 个提交、33 个变更文件；开始时位于 `main`，工作区干净。本次以当前源码、基线 diff 和独立验证为准，不以此前审计或发布记录代替验证。没有修改实现、测试或部署配置。
+
+### 确认的问题（待授权修复，均为 P2）
+
+1. **合并能把有效的共享隧道配置写成无效配置**（`scripts/restore-tunnel-config.ps1:115-124`）：只把 `- service: http_status:...` 当作 catch-all；合法的 HTTP/HTTPS 服务兜底未被识别，新增路由被追加到兜底之后。使用临时配置、假凭据及真实 `cloudflared tunnel --config <临时文件> ingress validate` 验证：合并前退出码 0，restore 返回 0，合并后校验退出码 1，报后续规则永远不能命中。重启 connector 时可能使共享隧道的其他业务一并不可用。建议按 hostname/path 缺省语义识别兜底，并在替换目标文件前验证完整候选配置；不能支持的结构应拒绝，不应写入。
+2. **导出仍不兼容正式安装器的配置文件位置**（`scripts/export-move.ps1:82-85`；对照 `scripts/install.ps1:263`）：正式 Named Tunnel 安装写入 `<TunnelName>.yml`，导出只认 `~/.cloudflared/config.yml`，也没有指定配置路径的参数。按正式安装器的文件布局构造临时 Node，导出退出码 1、无 ZIP。建议明确选择本 Node 实际使用的配置，多个候选时拒绝猜选；回归应贯通正式安装布局与 MOVE 导出，而不仅使用手写 config.yml fixture。
+3. **凭据解析不尊重实际引用路径**（`scripts/export-move.ps1:95-104`）：正则未处理 YAML 单引号，且对解析出的路径只保留 basename，再强制拼回 `~/.cloudflared`。两种隔离用例均失败：无空格的单引号路径被当作文件名尾部带 `'` 的路径（正式安装器在 `install.ps1:338` 恰好输出单引号）；配置引用外部目录内真实存在的凭据时，脚本却去 cloudflared 目录找同名文件。建议正确解析 YAML 标量及实际源路径，仅打包时使用安全文件名，保留 TunnelID 校验。
+4. **导出路由丢失匹配条件和源站选项**（`scripts/export-move.ps1:122-127`；恢复只写 hostname/service，见 `scripts/restore-tunnel-config.ps1:127-131`）：输入含 `path: ^/mcp$` 和 `originRequest` 的合法路由时，导出成功，但 manifest 只剩 hostname/service；恢复后路径限制被扩大为整个 hostname，TLS、Host header 等源站选项也无法恢复。建议保留所选路由的完整语义及相关默认值，或者明确拒绝无法无损迁移的配置，不能静默丢弃。已用假配置确认 manifest 丢字段；未对真实域名发请求。
+5. **生命周期异常路径仍泄漏监控线程和数据库连接**（`src/desksense/server.py:200-205`）：清理语句位于内层 lifespan 的正常退出之后，没有 `finally`。分别注入 SDK startup/shutdown 异常，退出后均为 `monitor_alive=True`、`db_open=True`、`stop_requested=False`；探针随后主动关闭了这些临时资源。在宿主进程仍存活的嵌入式/测试用法中，会继续采集并持有 SQLite；当前 CLI 整个进程退出时 OS 会回收资源，不能据此认定当前部署一直泄漏。建议将清理放入 `finally`，并覆盖内层启动失败和关闭失败。
+
+### 验证与边界
+
+- 本地环境：Python 3.14.6、mcp 2.0.0、Starlette 1.6.0、psutil 7.2.2。
+- `PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider`：75/75 通过（29.14 秒）。现有测试未覆盖上述异常/配置变体；全绿不代表迁移契约完整。
+- `pip check`、26 个 Git 跟踪 Python 文件 AST 检查、14 个 Git 跟踪 PowerShell 脚本的 Windows PowerShell 5.1 语法检查、范围 diff 的 `git diff --check` 通过。PowerShell 诊断包装首次输出遇终端编码错误，固定 UTF-8 输出后重新执行并确认退出码 0。
+- 附加探针复用了 `tests/test_move_scripts.py` 的临时 fixture/helper；配置、凭据及数据库全部为本次生成的假数据。cloudflared 仅执行离线 ingress 校验；生命周期测试 mock 了桌面读取。临时文件已清理，未读取真实 token、焦点历史或隧道凭据，未修改 ACL、计划任务、运行配置，未终止真实服务。
+- 经 Context7 核对 Cloudflare 官方配置文档：catch-all 可使用普通 HTTP/HTTPS 服务，规则按序匹配，缺少 path 表示匹配所有路径；Starlette 文档的生命周期清理语义与本次异常探针一致。
+- 未执行真实迁移、交互式安装、真实登录触发、公网 MCP 验收，也未重新核验远端 CI 或发布附件。本次仅追加审查记录。
+- 建议下一步优先修复迁移配置损坏/语义丢失，再修复导出兼容与生命周期异常清理；先补失败回归，修复后重跑全套及隔离 cloudflared 校验。范围尚未获实施授权。
