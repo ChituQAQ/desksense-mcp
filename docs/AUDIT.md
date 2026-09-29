@@ -168,3 +168,11 @@
 - 构建验证：首次额外尝试 `--no-build-isolation` 因本地 venv 无 setuptools 而失败；恢复项目默认构建隔离后，`pip install --no-deps -e .` 成功构建并安装 editable wheel，随后全套 106/106 再次通过。新增显式依赖 `PyYAML>=6.0.2,<7`，本地使用 6.0.3；未修改全局 Python 或宿主配置。
 - `docs/MIGRATE.md` 已同步新参数、依赖更新命令、保留字段与安全限制。直接调用恢复脚本且无 cloudflared 时只做结构/语义检查并告警；完整安装流程传入已发现的 CLI，强制候选 ingress 离线校验。
 - 用户确认继续，本轮实现、测试及审计进展纳入单独的修复提交；审查记录已独立提交为 `fe96866`。本次不推送、不发布。未修改真实运行配置、ACL、任务或隧道，未停止服务、读取真实凭据、执行交互式安装，也未运行真实迁移或生成发布 ZIP。剩余验收为推送后的多版本冷环境 CI、实际迁移和真实登录触发；当前服务未重启验证新生命周期代码。
+
+### 2026-09-29：推送与 Windows 冷环境 CI 验证
+
+- 用户授权推送并验证 Windows CI；已将 `fe96866`、`4265a06` 推送至 `origin/main`，无强推、无发布、无部署操作。
+- 源码提交 `4265a062279c61d4b58de4405146a2665267c023` 的 [Windows CI run 36514586330](https://github.com/ChituQAQ/desksense-mcp/actions/runs/36514586330) 已完成，结论 `success`，5/5 jobs 通过。已核对 GitHub Actions 的 headSha、各 job/step 终态及运行日志，不以本地测试代替远端结果。
+- Windows Python 矩阵：3.11 为 106 passed（50.95 秒）、3.12 为 106 passed（49.71 秒）、3.13 为 106 passed（66.47 秒）、3.14 为 106 passed（60.53 秒）。依赖安装、项目导入与测试均通过。
+- `PowerShell and clean-room ZIP` 通过：PS5.1 全脚本解析、VBS 无 BOM、ZIP 私密路径检查、带空格的洁净目录安装，以及安装结束后端口无残留监听。安装日志确认 `Health status: OK`、`Tools verification: 7/7`；本轮无需追加实现修复。
+- 本次仅推送源码与审计记录，未发布 Release、创建标签或操作真实部署。冷环境 CI 验证的是本地安装；真实 Node 迁移、当前服务重启后的验证、真实登录触发及公网 Named Tunnel 验收仍未执行。
