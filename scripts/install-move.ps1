@@ -115,7 +115,7 @@ if (-not (Test-Path -LiteralPath $RestoreScript -PathType Leaf)) {
     Write-Host "ERROR: $RestoreScript not found." -ForegroundColor Red
     exit 1
 }
-& $RestoreScript -ManifestFile $ManifestPath -ArchiveCfdDir $CfdArchive -CfdHome $CfdHome -MergeIngress:$MergeIngress
+& $RestoreScript -ManifestFile $ManifestPath -ArchiveCfdDir $CfdArchive -CfdHome $CfdHome -MergeIngress:$MergeIngress -CloudflaredExe $Cf
 $Manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
 $CfgHostname = ''
 if ($Manifest.routes) {

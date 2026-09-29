@@ -199,10 +199,12 @@ def build_app(cfg: Optional[Config] = None):
 
     @contextlib.asynccontextmanager
     async def _lifespan(app):
-        async with inner_lifespan(mcp_app):
-            yield
-        history.stop_monitor()
-        history.close()
+        try:
+            async with inner_lifespan(mcp_app):
+                yield
+        finally:
+            # close() also stops the monitor, including failed SDK startup/teardown.
+            history.close()
 
     app = Starlette(
         routes=[Mount("/", app=mcp_app)],

@@ -53,3 +53,41 @@ async def test_asgi_shutdown_stops_monitor_and_closes_db(tmp_path, monkeypatch):
         assert history._db is None
     finally:
         history.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["startup", "shutdown", "body"])
+async def test_lifespan_failure_still_releases_history(tmp_path, monkeypatch, failure_stage):
+    import contextlib
+    from starlette.applications import Starlette
+    import desksense.config as config_module
+    import desksense.server as server_module
+
+    @contextlib.asynccontextmanager
+    async def inner_lifespan(app):
+        if failure_stage == "startup":
+            raise RuntimeError("simulated lifespan failure")
+        yield
+        if failure_stage == "shutdown":
+            raise RuntimeError("simulated lifespan failure")
+
+    inner = Starlette(lifespan=inner_lifespan)
+
+    class FakeServer:
+        def streamable_http_app(self, **kwargs):
+            return inner
+
+    monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(server_module, "_configure_logging", lambda cfg: None)
+    monkeypatch.setattr(server_module, "_create_server", lambda cfg, history: FakeServer())
+    monkeypatch.setattr("desksense.windows_focus.get_foreground_info", lambda: {"pid": None})
+    app, history, _ = server_module.build_app(Config({}))
+    try:
+        with pytest.raises(RuntimeError, match="simulated lifespan failure"):
+            async with app.router.lifespan_context(app):
+                if failure_stage == "body":
+                    raise RuntimeError("simulated lifespan failure")
+        assert not history._thread.is_alive()
+        assert history._db is None
+    finally:
+        history.close()

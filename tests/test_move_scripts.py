@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -29,6 +30,7 @@ def run_ps(script: str) -> subprocess.CompletedProcess[str]:
     encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
     # A parent pwsh session can leak incompatible PS7 modules into Windows PS5.1.
     env = {k: v for k, v in os.environ.items() if k.lower() != "psmodulepath"}
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     return subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
          "Bypass", "-EncodedCommand", encoded],
@@ -111,7 +113,8 @@ SAME_TUNNEL_CONFIG = (
 def make_export_node(tmp_path: Path) -> tuple[Path, Path, Path]:
     node = tmp_path / "node"
     (node / "scripts").mkdir(parents=True)
-    shutil.copy2(SCRIPTS / "export-move.ps1", node / "scripts" / "export-move.ps1")
+    for name in ("export-move.ps1", "invoke-move-config.ps1", "move-config.py"):
+        shutil.copy2(SCRIPTS / name, node / "scripts" / name)
     (node / "config.json").write_text('{"port": 18765}', encoding="utf-8")
     home = tmp_path / "home"
     cfd = home / ".cloudflared"
@@ -135,7 +138,7 @@ def test_export_packs_only_referenced_credential_and_local_routes(tmp_path):
     node, home, out = make_export_node(tmp_path)
     (home / ".cloudflared" / "config.yml").write_text(
         f"tunnel: {TUNNEL_ID}\n"
-        f'credentials-file: "{home / ".cloudflared" / (TUNNEL_ID + ".json")}"\n'
+        f'credentials-file: "{(home / ".cloudflared" / (TUNNEL_ID + ".json")).as_posix()}"\n'
         "protocol: http2\n\n"
         "ingress:\n"
         "  - hostname: pc.example.com\n"
@@ -169,7 +172,7 @@ def test_export_refuses_when_no_route_targets_local_port(tmp_path):
     node, home, out = make_export_node(tmp_path)
     (home / ".cloudflared" / "config.yml").write_text(
         f"tunnel: {TUNNEL_ID}\n"
-        f'credentials-file: "{home / ".cloudflared" / (TUNNEL_ID + ".json")}"\n'
+        f'credentials-file: "{(home / ".cloudflared" / (TUNNEL_ID + ".json")).as_posix()}"\n'
         "ingress:\n"
         "  - hostname: other.example.com\n"
         "    service: http://127.0.0.1:9999\n"
@@ -189,7 +192,7 @@ def test_export_refuses_when_credential_tunnelid_mismatches(tmp_path):
     # config.yml 声明 TUNNEL_ID，但引用的凭据文件属于另一条隧道。
     (home / ".cloudflared" / "config.yml").write_text(
         f"tunnel: {TUNNEL_ID}\n"
-        f'credentials-file: "{home / ".cloudflared" / (OTHER_TUNNEL_ID + ".json")}"\n'
+        f'credentials-file: "{(home / ".cloudflared" / (OTHER_TUNNEL_ID + ".json")).as_posix()}"\n'
         "ingress:\n"
         "  - hostname: pc.example.com\n"
         "    service: http://127.0.0.1:18765\n"
@@ -330,7 +333,7 @@ def test_move_script_text_contracts():
     # 绝不重新引入“打包目录下所有 JSON”的行为。
     assert "-like '*.json'" not in export_move
     assert "credentials-file" in export_move
-    assert "ConvertTo-Json -Depth 4" in export_move
+    assert "ConvertTo-Json -Depth 100" in export_move
 
     tunnel_autostart = (SCRIPTS / "install-tunnel-autostart.ps1").read_text(encoding="utf-8-sig")
     assert "Unregister-ScheduledTask" not in tunnel_autostart
